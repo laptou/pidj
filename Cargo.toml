@@ -1,0 +1,11 @@
+[package]
+name = "pidj"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { version = "1.0.66", features = ["backtrace"] }
+embedded-hal = "0.2.7"
+rppal = { version = "0.13.1", features = ["embedded-hal"] }
+thiserror = "1.0.37"
+tracing = "0.1.37"
