@@ -5,7 +5,10 @@ use driver::adafruit::seesaw::SeeSaw;
 use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
 use rppal::i2c::I2c;
 
-use crate::driver::adafruit::seesaw::neopixel::{Color, NeoPixel, GRB};
+use crate::driver::adafruit::seesaw::{
+    neopixel::{Color, NeoPixel, GRB},
+    neotrellis::NeoTrellis,
+};
 mod driver;
 
 struct Delay;
@@ -27,21 +30,27 @@ fn main() -> anyhow::Result<()> {
         .context("failed to get seesaw version")?;
     println!("seesaw version: {seesaw_ver}");
 
-    let mut np = NeoPixel::<_, _, GRB, 16>::new(&mut seesaw);
-    np.init(true, 3)?;
+    let mut np = NeoPixel::new(&mut seesaw);
+    let mut nt = NeoTrellis::new(&mut np);
+    nt.init()?;
 
     loop {
-        np.set_pixel_color(
-            1,
-            Color {
-                r: 255,
-                g: 0,
-                b: 0,
-                w: 255,
-            },
-        )?;
+        for x in 0..4 {
+            for y in 0..4 {
+                nt.set_pixel_color(
+                    x,
+                    y,
+                    Color {
+                        r: (x * 85) as u8,
+                        g: (y * 85) as u8,
+                        b: 0,
+                        w: 0,
+                    },
+                )?;
+            }
+        }
         delay.delay_us(300);
-        np.show()?;
+        nt.show()?;
     }
 
     // std::thread::sleep(Duration::from_secs(5));

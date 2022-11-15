@@ -77,7 +77,7 @@ where
     }
 
     /// Get the count of pending key events on the keypad
-    pub fn keypad_get_count<DELAY: DelayUs<u32>>(
+    pub fn get_keypad_event_count<DELAY: DelayUs<u32>>(
         &mut self,
         delay: &mut DELAY,
     ) -> Result<u8, Error> {
@@ -87,7 +87,7 @@ where
     }
 
     /// Enable or disable the interrupt
-    pub fn keypad_set_interrupt(&mut self, enable: bool) -> Result<(), Error> {
+    pub fn set_keypad_interrupt(&mut self, enable: bool) -> Result<(), Error> {
         use keypad::functions::{INTENCLR, INTENSET};
 
         let func = if enable { INTENSET } else { INTENCLR };
@@ -95,28 +95,18 @@ where
     }
 
     /// Set or clear the trigger event on a given key.
-    ///
-    /// I'm unclear on how these key numbers are typically set. For the Neotrellis,
-    /// there is some complicated bit mask/shifting to go from 0-16 to the
-    /// actual u8 values
-    pub fn keypad_set_event_raw(
+    pub fn set_keypad_event(
         &mut self,
-        key_raw: u8,
+        key: u8,
         edge: keypad::Edge,
         status: keypad::Status,
     ) -> Result<(), Error> {
         let stat: u8 = (1 << ((edge as u8) + 1)) | (status as u8);
-        self.write(keypad::BASE, keypad::functions::EVENT, &[key_raw, stat])
+        self.write(keypad::BASE, keypad::functions::EVENT, &[key, stat])
     }
 
     /// Read an event on a given key.
-    ///
-    /// I'm unclear on how these key numbers are typically set. For the Neotrellis,
-    /// there is some complicated bit mask/shifting to go from 0-16 to the
-    /// actual u8 values
-    ///
-    /// Additionally theres some shenanigans to convert the raw bufer to (key + event)
-    pub fn keypad_read_raw<DELAY: DelayUs<u32>>(
+    pub fn get_keypad_events<DELAY: DelayUs<u32>>(
         &mut self,
         buf: &mut [u8],
         delay: &mut DELAY,
@@ -124,7 +114,7 @@ where
         self.read(keypad::BASE, keypad::functions::FIFO, delay, buf)
     }
 
-    pub fn status_get_hwid<DELAY: DelayUs<u32>>(&mut self, delay: &mut DELAY) -> Result<u8, Error> {
+    pub fn get_status_hwid<DELAY: DelayUs<u32>>(&mut self, delay: &mut DELAY) -> Result<u8, Error> {
         let mut buf = [0u8; 1];
         self.read(status::BASE, status::functions::HW_ID, delay, &mut buf)
             .map_err(|_| Error::I2c)?;
@@ -151,14 +141,14 @@ where
         Ok(u32::from_be_bytes(buf))
     }
 
-    /// Get raw temperature. To convert to celcius, divide by (1 << 16)
-    pub fn get_temp_raw<DELAY: DelayUs<u32>>(
+    /// Get temperature in Celsius.
+    pub fn get_temp<DELAY: DelayUs<u32>>(
         &mut self,
         delay: &mut DELAY,
     ) -> Result<u32, Error> {
         let mut buf = [0u8; 4];
         self.read(status::BASE, status::functions::TEMP, delay, &mut buf)
             .map_err(|_| Error::I2c)?;
-        Ok(u32::from_be_bytes(buf))
+        Ok(u32::from_be_bytes(buf) / (1 << 16))
     }
 }

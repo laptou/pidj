@@ -7,6 +7,7 @@ use bytes::{BufMut, BytesMut};
 use embedded_hal::blocking::i2c::{Read, Write};
 
 use super::{Error, SeeSaw};
+pub use color::*;
 
 pub const BASE: u8 = 0x0E;
 
@@ -18,69 +19,74 @@ pub mod functions {
     pub const SHOW: u8 = 0x05;
 }
 
-pub trait ColorOrder {
-    const BYTES_PER_PIXEL: u8;
+pub mod color {
+    use bytes::BufMut;
 
-    fn put(buf: &mut impl BufMut, color: Color);
-}
+    pub trait ColorOrder {
+        const BYTES_PER_PIXEL: u8;
 
-#[derive(Clone, Copy)]
-pub struct RGB;
+        fn put(buf: &mut impl BufMut, color: Color);
+    }
 
-impl ColorOrder for RGB {
-    const BYTES_PER_PIXEL: u8 = 3;
+    #[derive(Clone, Copy)]
+    pub struct RGB;
 
-    fn put(buf: &mut impl BufMut, color: Color) {
-        buf.put_u8(color.r);
-        buf.put_u8(color.g);
-        buf.put_u8(color.b);
+    impl ColorOrder for RGB {
+        const BYTES_PER_PIXEL: u8 = 3;
+
+        fn put(buf: &mut impl BufMut, color: Color) {
+            buf.put_u8(color.r);
+            buf.put_u8(color.g);
+            buf.put_u8(color.b);
+        }
+    }
+
+    pub struct GRB;
+
+    impl ColorOrder for GRB {
+        const BYTES_PER_PIXEL: u8 = 3;
+
+        fn put(buf: &mut impl BufMut, color: Color) {
+            buf.put_u8(color.g);
+            buf.put_u8(color.r);
+            buf.put_u8(color.b);
+        }
+    }
+    pub struct RGBW;
+
+    impl ColorOrder for RGBW {
+        const BYTES_PER_PIXEL: u8 = 4;
+
+        fn put(buf: &mut impl BufMut, color: Color) {
+            buf.put_u8(color.r);
+            buf.put_u8(color.g);
+            buf.put_u8(color.b);
+            buf.put_u8(color.w);
+        }
+    }
+    pub struct GRBW;
+
+    impl ColorOrder for GRBW {
+        const BYTES_PER_PIXEL: u8 = 4;
+
+        fn put(buf: &mut impl BufMut, color: Color) {
+            buf.put_u8(color.g);
+            buf.put_u8(color.r);
+            buf.put_u8(color.b);
+            buf.put_u8(color.w);
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+
+    pub struct Color {
+        pub r: u8,
+        pub g: u8,
+        pub b: u8,
+        pub w: u8,
     }
 }
 
-pub struct GRB;
-
-impl ColorOrder for GRB {
-    const BYTES_PER_PIXEL: u8 = 3;
-
-    fn put(buf: &mut impl BufMut, color: Color) {
-        buf.put_u8(color.g);
-        buf.put_u8(color.r);
-        buf.put_u8(color.b);
-    }
-}
-pub struct RGBW;
-
-impl ColorOrder for RGBW {
-    const BYTES_PER_PIXEL: u8 = 4;
-
-    fn put(buf: &mut impl BufMut, color: Color) {
-        buf.put_u8(color.r);
-        buf.put_u8(color.g);
-        buf.put_u8(color.b);
-        buf.put_u8(color.w);
-    }
-}
-pub struct GRBW;
-
-impl ColorOrder for GRBW {
-    const BYTES_PER_PIXEL: u8 = 4;
-
-    fn put(buf: &mut impl BufMut, color: Color) {
-        buf.put_u8(color.g);
-        buf.put_u8(color.r);
-        buf.put_u8(color.b);
-        buf.put_u8(color.w);
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub w: u8,
-}
 
 pub struct NeoPixel<
     I2C: Read + Write,
