@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use bytes::{Buf, BytesMut};
+
 use driver::adafruit::seesaw::SeeSaw;
 use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
-use num_traits::FromPrimitive;
+
 use rppal::i2c::I2c;
 
 use crate::driver::adafruit::seesaw::{
-    keypad::{Edge, KeyEvent},
+    keypad::Edge,
     neopixel::{Color, NeoPixel},
     neotrellis::NeoTrellis,
 };
@@ -42,7 +42,6 @@ fn main() -> anyhow::Result<()> {
             nt.set_keypad_event(x, y, Edge::Rising, true)?;
         }
     }
-
 
     loop {
         for x in 0..4 {

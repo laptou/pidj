@@ -89,8 +89,11 @@ impl<
         edge: Edge,
         enable: bool,
     ) -> Result<(), Error> {
-        self.0
-            .set_keypad_event(neotrellis_key_to_seesaw(neotrellis_xy(pixel_x, pixel_y)) as u8, edge, enable)
+        self.0.set_keypad_event(
+            neotrellis_key_to_seesaw(neotrellis_xy(pixel_x, pixel_y)) as u8,
+            edge,
+            enable,
+        )
     }
 
     pub fn get_keypad_events<DELAY: DelayUs<u32>>(

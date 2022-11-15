@@ -87,7 +87,6 @@ pub mod color {
     }
 }
 
-
 pub struct NeoPixel<
     I2C: Read + Write,
     S: DerefMut<Target = SeeSaw<I2C>>,

@@ -120,20 +120,14 @@ where
         Ok(buf[0])
     }
 
-    pub fn get_version<DELAY: DelayUs<u32>>(
-        &mut self,
-        delay: &mut DELAY,
-    ) -> Result<u32, Error> {
+    pub fn get_version<DELAY: DelayUs<u32>>(&mut self, delay: &mut DELAY) -> Result<u32, Error> {
         let mut buf = [0u8; 4];
         self.read(status::BASE, status::functions::VERSION, delay, &mut buf)
             .map_err(|_| Error::I2c)?;
         Ok(u32::from_be_bytes(buf))
     }
 
-    pub fn get_options<DELAY: DelayUs<u32>>(
-        &mut self,
-        delay: &mut DELAY,
-    ) -> Result<u32, Error> {
+    pub fn get_options<DELAY: DelayUs<u32>>(&mut self, delay: &mut DELAY) -> Result<u32, Error> {
         let mut buf = [0u8; 4];
         self.read(status::BASE, status::functions::OPTIONS, delay, &mut buf)
             .map_err(|_| Error::I2c)?;
@@ -141,10 +135,7 @@ where
     }
 
     /// Get temperature in Celsius.
-    pub fn get_temp<DELAY: DelayUs<u32>>(
-        &mut self,
-        delay: &mut DELAY,
-    ) -> Result<u32, Error> {
+    pub fn get_temp<DELAY: DelayUs<u32>>(&mut self, delay: &mut DELAY) -> Result<u32, Error> {
         let mut buf = [0u8; 4];
         self.read(status::BASE, status::functions::TEMP, delay, &mut buf)
             .map_err(|_| Error::I2c)?;
