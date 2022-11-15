@@ -99,14 +99,13 @@ where
         &mut self,
         key: u8,
         edge: keypad::Edge,
-        status: keypad::Status,
+        enable: bool,
     ) -> Result<(), Error> {
-        let stat: u8 = (1 << ((edge as u8) + 1)) | (status as u8);
+        let stat: u8 = (1 << ((edge as u8) + 1)) | (enable as u8);
         self.write(keypad::BASE, keypad::functions::EVENT, &[key, stat])
     }
 
-    /// Read an event on a given key.
-    pub fn get_keypad_events<DELAY: DelayUs<u32>>(
+    pub fn get_keypad_events_raw<DELAY: DelayUs<u32>>(
         &mut self,
         buf: &mut [u8],
         delay: &mut DELAY,

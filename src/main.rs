@@ -1,12 +1,15 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use bytes::{Buf, BytesMut};
 use driver::adafruit::seesaw::SeeSaw;
 use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
+use num_traits::FromPrimitive;
 use rppal::i2c::I2c;
 
 use crate::driver::adafruit::seesaw::{
-    neopixel::{Color, NeoPixel, GRB},
+    keypad::{Edge, KeyEvent},
+    neopixel::{Color, NeoPixel},
     neotrellis::NeoTrellis,
 };
 mod driver;
@@ -34,6 +37,13 @@ fn main() -> anyhow::Result<()> {
     let mut nt = NeoTrellis::new(&mut np);
     nt.init()?;
 
+    for x in 0..4 {
+        for y in 0..4 {
+            nt.set_keypad_event(x, y, Edge::Rising, true)?;
+        }
+    }
+
+
     loop {
         for x in 0..4 {
             for y in 0..4 {
@@ -49,11 +59,15 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
         }
+
         delay.delay_us(300);
+
         nt.show()?;
+
+        for evt in nt.get_keypad_events(&mut delay)? {
+            println!("key event: {evt:?}");
+        }
+
+        delay.delay_us(300);
     }
-
-    // std::thread::sleep(Duration::from_secs(5));
-
-    Ok(())
 }

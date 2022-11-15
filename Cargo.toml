@@ -7,6 +7,8 @@ edition = "2021"
 anyhow = { version = "1.0", features = ["backtrace"] }
 bytes = "1.2.1"
 embedded-hal = "0.2.7"
+num-derive = "0.3.3"
+num-traits = "0.2.15"
 rppal = { version = "0.14", features = ["hal"] }
 thiserror = "1.0.37"
 tracing = "0.1.37"

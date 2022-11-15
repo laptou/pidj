@@ -1,3 +1,6 @@
+use num_derive::{FromPrimitive, ToPrimitive};
+use num_traits::FromPrimitive;
+
 pub const BASE: u8 = 0x10;
 
 pub mod functions {
@@ -11,11 +14,24 @@ pub mod functions {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct KeyEvent {
-    pub key: u8,
-    pub event: Edge,
+    pub key: u16,
+    pub edge: Edge,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+impl FromPrimitive for KeyEvent {
+    fn from_i64(_: i64) -> Option<Self> {
+        None
+    }
+
+    fn from_u64(n: u64) -> Option<Self> {
+        Some(Self {
+            edge: Edge::from_u8((n & 0b11) as u8)?,
+            key: ((n & 0b1111_1111_1111_1100) >> 2) as u16,
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 #[repr(u8)]
 pub enum Edge {
     /// Indicates that the key is currently pressed
@@ -29,22 +45,4 @@ pub enum Edge {
 
     /// Indicates that the key was recently pressed
     Rising = 0x03,
-}
-
-impl Edge {
-    pub fn from_u8(val: u8) -> Result<Self, super::Error> {
-        match val {
-            0 => Ok(Edge::High),
-            1 => Ok(Edge::Low),
-            2 => Ok(Edge::Falling),
-            3 => Ok(Edge::Rising),
-            _ => Err(super::Error::SeeSaw(super::SeeSawError::InvalidArgument)),
-        }
-    }
-}
-
-#[repr(u8)]
-pub enum Status {
-    Disable = 0x00,
-    Enable = 0x01,
 }

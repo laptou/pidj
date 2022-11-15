@@ -142,9 +142,9 @@ impl<
         Ok(())
     }
 
-    pub fn set_pixel_color(&mut self, pixel: usize, color: Color) -> Result<(), Error> {
+    pub fn set_pixel_color(&mut self, pixel: u16, color: Color) -> Result<(), Error> {
         let mut buf = BytesMut::new();
-        buf.put_u16(pixel as u16 * P::BYTES_PER_PIXEL as u16);
+        buf.put_u16(pixel * P::BYTES_PER_PIXEL as u16);
         P::put(&mut buf, color);
         self.write(BASE, functions::BUF, &buf[..])
     }
