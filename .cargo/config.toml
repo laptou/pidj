@@ -1,0 +1,5 @@
+[build]
+target = "armv7-unknown-linux-gnueabihf"
+
+[target.armv7-unknown-linux-gnueabihf]
+linker = "/home/ibiyemi/projects/experiments/xcompile/opt/cross/bin/armv7l-linux-gnueabihf-gcc"

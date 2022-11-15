@@ -1,1 +1,1 @@
-mod adafruit;
+pub mod adafruit;
