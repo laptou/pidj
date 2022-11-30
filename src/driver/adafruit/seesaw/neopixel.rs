@@ -77,13 +77,47 @@ pub mod color {
         }
     }
 
-    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 
     pub struct Color {
         pub r: u8,
         pub g: u8,
         pub b: u8,
         pub w: u8,
+    }
+
+    impl Color {
+        pub const BLACK: Color = Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            w: 0,
+        };
+
+        pub const WHITE: Color = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            w: 255,
+        };
+
+        pub fn from_f32(r: f32, g: f32, b: f32) -> Color {
+            Self {
+                r: (r * 255.) as u8,
+                g: (g * 255.) as u8,
+                b: (b * 255.) as u8,
+                w: 255,
+            }
+        }
+
+        pub fn from_u8(r: u8, g: u8, b: u8) -> Color {
+            Self {
+                r,
+                g,
+                b,
+                w: 255,
+            }
+        }
     }
 }
 

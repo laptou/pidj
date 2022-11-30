@@ -49,7 +49,7 @@ pub const fn neotrellis_xy_to_key(x: u16, y: u16) -> u16 {
 
 // converts x and y into a neotrellis key code
 pub const fn neotrellis_key_to_xy(k: u16) -> (u16, u16) {
-    (k / 4, k % 4)
+    (k % 4, k / 4)
 }
 
 // converts neotrellis keycode into seesaw key code
