@@ -1,14 +1,26 @@
-use tokio::sync::{broadcast, mpsc};
+use tracing_subscriber::EnvFilter;
 
+mod audio;
 mod driver;
 mod keyboard;
 
 fn main() -> anyhow::Result<()> {
-    let (_cmd_tx, cmd_rx) = mpsc::channel(256);
-    let (evt_tx, _evt_rx) = broadcast::channel(256);
-    let kb_join = keyboard::spawn_keyboard_thread(cmd_rx, evt_tx);
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
+    let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
+
+    let (audio_cmd_tx, audio_cmd_rx) = flume::bounded(256);
+    let (audio_evt_tx, audio_evt_rx) = flume::bounded(256);
+
+    let kb_join = keyboard::spawn_thread(kb_cmd_rx, kb_evt_tx);
+    let audio_join = audio::spawn_thread(audio_cmd_rx, audio_evt_tx);
 
     kb_join.join().unwrap()?;
+    audio_join.join().unwrap()?;
 
     Ok(())
 }

@@ -1,4 +1,4 @@
 #!/bin/bash
 exec_name=`basename $1`
 scp $1 pi@iaa34.local:/home/pi
-ssh pi@iaa34.local /home/pi/$exec_name
+ssh -t pi@iaa34.local "RUST_LOG=pidj=debug /home/pi/$exec_name"
