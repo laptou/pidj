@@ -5,6 +5,7 @@ use anyhow::Context;
 use driver::adafruit::seesaw::SeeSaw;
 use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
 
+use palette::{rgb::Rgb, FromColor, Hsv};
 use rppal::i2c::I2c;
 
 use crate::driver::adafruit::seesaw::{
@@ -43,16 +44,21 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let mut angle_offset = 0.000;
     loop {
         for x in 0..4 {
             for y in 0..4 {
+                let angle = f32::atan2(y as f32 - 1.5, x as f32 - 1.5) + angle_offset;
+                let color = Hsv::new(palette::RgbHue::from_radians(angle), 1.0, 1.0);
+                let color = Rgb::from_color(color);
+                let color: Rgb<_, u8> = color.into();
                 nt.set_pixel_color(
                     x,
                     y,
                     Color {
-                        r: (x * 85) as u8,
-                        g: (y * 85) as u8,
-                        b: 0,
+                        r: color.red,
+                        g: color.green,
+                        b: color.blue,
                         w: 0,
                     },
                 )?;
@@ -68,5 +74,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         delay.delay_us(300);
+
+        angle_offset += 0.1;
     }
 }
