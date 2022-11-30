@@ -27,6 +27,8 @@ pub enum SeeSawError {
     InvalidSize,
     #[error("invalid argument")]
     InvalidArgument,
+    #[error("invalid key code")]
+    InvalidKeycode,
 }
 
 const BUFFER_MAX: usize = 32;

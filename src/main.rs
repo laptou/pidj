@@ -7,6 +7,7 @@ use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
 
 use palette::{rgb::Rgb, FromColor, Hsv};
 use rppal::i2c::I2c;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::driver::adafruit::seesaw::{
     keypad::Edge,
@@ -14,67 +15,14 @@ use crate::driver::adafruit::seesaw::{
     neotrellis::NeoTrellis,
 };
 mod driver;
-
-struct Delay;
-
-impl embedded_hal::blocking::delay::DelayUs<u32> for Delay {
-    fn delay_us(&mut self, us: u32) {
-        std::thread::sleep(Duration::from_micros(us as u64))
-    }
-}
+mod keyboard;
 
 fn main() -> anyhow::Result<()> {
-    let i2c = I2c::new().context("failed to open i2c bus")?;
-    let mut seesaw = SeeSaw { i2c, address: 0x2E };
-    let mut delay = Delay;
+    let (cmd_tx, cmd_rx) = mpsc::channel(256);
+    let (evt_tx, evt_rx) = broadcast::channel(256);
+    let kb_join = keyboard::spawn_keyboard_thread(cmd_rx, evt_tx);
 
-    seesaw.sw_reset()?;
-    let seesaw_ver = seesaw
-        .get_version(&mut delay)
-        .context("failed to get seesaw version")?;
-    println!("seesaw version: {seesaw_ver}");
+    kb_join.join().unwrap()?;
 
-    let mut np = NeoPixel::new(&mut seesaw);
-    let mut nt = NeoTrellis::new(&mut np);
-    nt.init()?;
-
-    for x in 0..4 {
-        for y in 0..4 {
-            nt.set_keypad_event(x, y, Edge::Rising, true)?;
-        }
-    }
-
-    let mut angle_offset = 0.000;
-    loop {
-        for x in 0..4 {
-            for y in 0..4 {
-                let angle = f32::atan2(y as f32 - 1.5, x as f32 - 1.5) + angle_offset;
-                let color = Hsv::new(palette::RgbHue::from_radians(angle), 1.0, 1.0);
-                let color = Rgb::from_color(color);
-                let color: Rgb<_, u8> = color.into();
-                nt.set_pixel_color(
-                    x,
-                    y,
-                    Color {
-                        r: color.red,
-                        g: color.green,
-                        b: color.blue,
-                        w: 0,
-                    },
-                )?;
-            }
-        }
-
-        delay.delay_us(300);
-
-        nt.show()?;
-
-        for evt in nt.get_keypad_events(&mut delay)? {
-            println!("key event: {evt:?}");
-        }
-
-        delay.delay_us(300);
-
-        angle_offset += 0.1;
-    }
+    Ok(())
 }
