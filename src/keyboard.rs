@@ -58,25 +58,31 @@ pub fn spawn_thread(
 
         loop {
             // idle until we get a new command
-            let mut cmd = match cmd_rx.recv() {
-                Ok(cmd) => cmd,
-                Err(_) => break,
-            };
+            // but timeout at 20ms so we can check for keyboard events
+            match cmd_rx.recv_timeout(Duration::from_millis(20)) {
+                Ok(mut cmd) => {
+                    // then pull all of the pending commands out of the channel and
+                    // execute them
+                    loop {
+                        trace!("executing command {cmd:?}");
 
-            // then pull all of the pending commands out of the channel and
-            // execute them
-            loop {
-                trace!("executing command {cmd:?}");
+                        match cmd {
+                            Command::UpdateColor { x, y, color } => {
+                                nt.set_pixel_color(x, y, color)?
+                            }
+                        }
 
-                match cmd {
-                    Command::UpdateColor { x, y, color } => nt.set_pixel_color(x, y, color)?,
+                        cmd = match cmd_rx.try_recv() {
+                            Ok(cmd) => cmd,
+                            Err(_) => break,
+                        };
+                    }
                 }
-
-                cmd = match cmd_rx.try_recv() {
-                    Ok(cmd) => cmd,
-                    Err(_) => break,
-                };
-            }
+                Err(flume::RecvTimeoutError::Timeout) => {
+                    // timed out, there are no commands, so we just keep going
+                }
+                Err(flume::RecvTimeoutError::Disconnected) => break,
+            };
 
             delay.delay_us(300);
 
