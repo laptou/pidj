@@ -13,11 +13,8 @@ fn main() -> anyhow::Result<()> {
     let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
     let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
 
-    let (audio_cmd_tx, audio_cmd_rx) = flume::bounded(256);
-    let (audio_evt_tx, audio_evt_rx) = flume::bounded(256);
-
     let kb_join = keyboard::spawn_thread(kb_cmd_rx, kb_evt_tx);
-    let audio_join = audio::spawn_thread(audio_cmd_rx, audio_evt_tx);
+    let audio_join = audio::spawn_thread(kb_evt_rx);
 
     kb_join.join().unwrap()?;
     audio_join.join().unwrap()?;

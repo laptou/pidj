@@ -53,6 +53,7 @@ pub fn spawn_thread(
         for x in 0..4 {
             for y in 0..4 {
                 nt.set_keypad_event(x, y, Edge::Rising, true)?;
+                nt.set_keypad_event(x, y, Edge::Falling, true)?;
             }
         }
 

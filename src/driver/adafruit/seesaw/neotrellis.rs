@@ -154,7 +154,14 @@ impl<
 
         for _ in 0..evt_count {
             let evt = evt_buf.get_u8();
-            evt_vec.push(KeyEvent::from_u8(evt).ok_or(Error::SeeSaw(SeeSawError::InvalidKeycode))?);
+            let evt = KeyEvent::from_u8(evt).ok_or(Error::SeeSaw(SeeSawError::InvalidKeycode))?;
+
+            if evt.key.0 > 3 || evt.key.1 > 3 {
+                // tiled neotrellis not supported
+                continue;
+            }
+
+            evt_vec.push(evt);
         }
 
         Ok(evt_vec)
