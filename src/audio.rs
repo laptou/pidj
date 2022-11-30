@@ -1,25 +1,16 @@
 use std::{
-    fs::{self, File},
+    fs::File,
     io::BufReader,
     thread::JoinHandle,
-    time::Duration,
 };
 
 use anyhow::Context;
-use embedded_hal::prelude::_embedded_hal_blocking_delay_DelayUs;
+use indicatif::{ProgressBar, ParallelProgressIterator};
 use rodio::Decoder;
-use rppal::i2c::I2c;
 use tracing::{debug, info, trace};
+use rayon::prelude::*;
 
-use crate::{
-    driver::adafruit::seesaw::{
-        keypad::Edge,
-        neopixel::{Color, NeoPixel},
-        neotrellis::{KeyEvent, NeoTrellis},
-        SeeSaw,
-    },
-    keyboard,
-};
+use crate::keyboard;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Command {}
@@ -36,8 +27,10 @@ pub fn spawn_thread(kb_evt_rx: flume::Receiver<keyboard::Event>) -> JoinHandle<a
 
         debug!("globbing {glob_pattern:?}");
 
+        let pb = ProgressBar::new_spinner();
         let audio_files = globwalk::glob(glob_pattern)?
-            .into_iter()
+            .par_bridge()
+            .progress_with(pb)
             .map(|entry| -> anyhow::Result<_> {
                 let entry = entry?;
                 let path = entry.path();
