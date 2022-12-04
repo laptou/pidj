@@ -1,9 +1,11 @@
 use cancellation::CancellationTokenSource;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use iced::Application;
 
 mod audio;
 mod driver;
+mod app;
 mod keyboard;
 
 fn main() -> anyhow::Result<()> {
@@ -25,6 +27,7 @@ fn main() -> anyhow::Result<()> {
 
     let kb_join = keyboard::spawn_thread(ct.clone(), kb_cmd_rx, kb_evt_tx);
     let audio_join = audio::spawn_thread(ct.clone(), kb_cmd_tx, kb_evt_rx);
+    app::run(ct.clone()).unwrap();
 
     kb_join.join().unwrap()?;
     audio_join.join().unwrap()?;

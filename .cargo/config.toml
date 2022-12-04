@@ -1,11 +1,14 @@
 [build]
 target = "armv7-unknown-linux-gnueabihf"
+# rustflags = [
+#   "-Z", "print-link-args"
+# ]
 
 [target.armv7-unknown-linux-gnueabihf]
 linker = "/home/ibiyemi/projects/experiments/xcompile/opt/cross/bin/armv7l-linux-gnueabihf-gcc"
 runner = "./run.sh"
 
 [env]
-# note: I had to cross-compile ALSA into this sysroot b/c rodio depends on ALSA
-PKG_CONFIG_PATH = "/usr/armv7l-unknown-linux-gnueabihf/lib/pkgconfig"
+LIBRARY_PATH = "/usr/armv7l-unknown-linux-gnueabihf/lib"
+PKG_CONFIG_LIBDIR = "/usr/armv7l-unknown-linux-gnueabihf/lib/pkgconfig"
 PKG_CONFIG_SYSROOT_DIR = "/usr/armv7l-unknown-linux-gnueabihf"
