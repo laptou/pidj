@@ -1,20 +1,11 @@
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::BufReader,
-    sync::{atomic::AtomicBool, Arc},
-    thread::JoinHandle,
-    time::{Duration, Instant},
-};
+use std::{fs::File, io::BufReader, time::Duration};
 
 use anyhow::Context;
-use cancellation::{CancellationToken, CancellationTokenSource};
-use embedded_hal::blocking::can;
-use indicatif::{ParallelProgressIterator, ProgressBar, ProgressIterator, ProgressStyle};
-use palette::encoding::pixel;
-use rayon::prelude::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use rodio::{Decoder, OutputStream, Source};
-use tracing::{debug, info, trace};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info};
 
 use crate::{
     driver::adafruit::seesaw::{keypad::Edge, neopixel::Color},
@@ -28,85 +19,94 @@ pub enum Command {}
 pub enum Event {}
 
 pub fn spawn_thread(
-    ct: Arc<CancellationToken>,
+    ct: CancellationToken,
     kb_cmd_tx: flume::Sender<keyboard::Command>,
     kb_evt_rx: flume::Receiver<keyboard::Event>,
 ) -> JoinHandle<anyhow::Result<()>> {
-    std::thread::spawn(move || {
-        let cts = CancellationTokenSource::new();
-        start_loading_animation(kb_cmd_tx.clone(), cts.token().clone());
+    tokio::spawn(async move {
+        let loading_token = ct.child_token();
 
-        info!("locating audio files");
+        let (paths, stream_handle) = {
+            start_loading_animation(loading_token.clone(), kb_cmd_tx.clone());
+            let _guard = loading_token.drop_guard();
 
-        let cwd = std::env::current_dir()?;
-        let glob_pattern = cwd.to_string_lossy() + "/**/*.{wav,flac,mp3}";
+            info!("locating audio files");
 
-        debug!("globbing {glob_pattern:?}");
+            let cwd = std::env::current_dir()?;
+            let glob_pattern = cwd.to_string_lossy() + "/**/*.{wav,flac,mp3}";
 
-        let pb_style = ProgressStyle::with_template(
-            "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
-        )
-        .unwrap();
+            debug!("globbing {glob_pattern:?}");
 
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(pb_style);
-        pb.set_prefix("Locating");
+            let pb_style = ProgressStyle::with_template(
+                "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
+            )
+            .unwrap();
 
-        let paths = globwalk::glob(glob_pattern)?
-            .map(|entry| -> anyhow::Result<_> {
-                let entry = entry?;
-                let path = entry.path();
-                pb.set_message(path.to_string_lossy().to_string());
-                Ok(path.to_path_buf())
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .context("failed to locate audio files")?;
+            let pb = ProgressBar::new_spinner();
+            pb.set_style(pb_style);
+            pb.set_prefix("Locating");
 
-        pb.finish_with_message("Located audio files");
+            let paths = globwalk::glob(glob_pattern)?
+                .map(|entry| -> anyhow::Result<_> {
+                    let entry = entry?;
+                    let path = entry.path();
+                    pb.set_message(path.to_string_lossy().to_string());
+                    Ok(path.to_path_buf())
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .context("failed to locate audio files")?;
 
-        let (_stream, stream_handle) =
-            OutputStream::try_default().context("no audio output stream available")?;
+            pb.finish_with_message("Located audio files");
 
-        cts.cancel();
+            let (_stream, stream_handle) =
+                OutputStream::try_default().context("no audio output stream available")?;
 
-        while !ct.is_canceled() {
-            match kb_evt_rx.recv() {
-                Ok(evt) => match evt {
-                    keyboard::Event::Key(evt) => {
-                        if let Edge::Rising = evt.edge {
-                            let sound_idx = (evt.key.0 * 4 + evt.key.1) as usize;
+            (paths, stream_handle)
+        };
 
-                            let path = match paths.get(sound_idx) {
-                                Some(path) => path,
-                                None => continue,
-                            };
+        loop {
+            tokio::select! {
+                _ = ct.cancelled() => { break; }
+                kb_evt = kb_evt_rx.recv_async() => {
+                    match kb_evt {
+                        Ok(evt) => match evt {
+                            keyboard::Event::Key(evt) => {
+                                if let Edge::Rising = evt.edge {
+                                    let sound_idx = (evt.key.0 * 4 + evt.key.1) as usize;
 
-                            debug!("key {:?} pressed, playing sound from {path:?}", evt.key);
+                                    let path = match paths.get(sound_idx) {
+                                        Some(path) => path,
+                                        None => continue,
+                                    };
 
-                            let file = File::open(path).context("failed to open audio file")?;
-                            let reader = BufReader::new(file);
-                            let decoder =
-                                Decoder::new(reader).context("failed to decode audio file")?;
+                                    debug!("key {:?} pressed, playing sound from {path:?}", evt.key);
 
-                            stream_handle
-                                .play_raw(decoder.convert_samples())
-                                .context("failed to play sound")?;
+                                    let file = File::open(path).context("failed to open audio file")?;
+                                    let reader = BufReader::new(file);
+                                    let decoder =
+                                        Decoder::new(reader).context("failed to decode audio file")?;
 
-                            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                                x: evt.key.0,
-                                y: evt.key.1,
-                                state: keyboard::PixelState::FadeExp {
-                                    from: Color::from_f32(1., 0., 0.),
-                                    to: Color::WHITE,
-                                    duration: Duration::from_secs(1),
-                                    progress: 0.,
-                                },
-                            });
-                        }
+                                    stream_handle
+                                        .play_raw(decoder.convert_samples())
+                                        .context("failed to play sound")?;
+
+                                    let _ = kb_cmd_tx.send(keyboard::Command::SetState {
+                                        x: evt.key.0,
+                                        y: evt.key.1,
+                                        state: keyboard::PixelState::FadeExp {
+                                            from: Color::from_f32(1., 0., 0.),
+                                            to: Color::WHITE,
+                                            duration: Duration::from_secs(1),
+                                            progress: 0.,
+                                        },
+                                    });
+                                }
+                            }
+                        },
+
+                        Err(_) => break,
                     }
-                },
-
-                Err(_) => break,
+                }
             }
         }
 
@@ -116,11 +116,8 @@ pub fn spawn_thread(
     })
 }
 
-fn start_loading_animation(
-    kb_cmd_tx: flume::Sender<keyboard::Command>,
-    cancel: Arc<CancellationToken>,
-) {
-    std::thread::spawn(move || {
+fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keyboard::Command>) {
+    tokio::spawn(async move {
         for x in 0..4 {
             for y in 0..4 {
                 let _ = kb_cmd_tx.send(keyboard::Command::SetState {
@@ -136,7 +133,7 @@ fn start_loading_animation(
 
         let mut highlight = 0;
 
-        while !cancel.is_canceled() {
+        while !ct.is_cancelled() {
             let x = highlight % 4;
             let y = highlight / 4;
 
@@ -163,7 +160,7 @@ fn start_loading_animation(
                 },
             });
 
-            std::thread::sleep(Duration::from_millis(250));
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
         for x in 0..4 {
