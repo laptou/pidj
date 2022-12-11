@@ -4,8 +4,8 @@ use iced::{Alignment, Application, Command, Element, Settings};
 use tokio_util::sync::CancellationToken;
 
 pub struct Flags {
-    rx: flume::Receiver<Message>,
-    ct: CancellationToken,
+    pub rx: flume::Receiver<Message>,
+    pub ct: CancellationToken,
 }
 
 pub fn run(flags: Flags) -> iced::Result {
@@ -32,7 +32,7 @@ struct Counter {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Message {
+pub enum Message {
     IncrementPressed,
     DecrementPressed,
     Exit,
@@ -86,7 +86,7 @@ impl Application for Counter {
         let rx = self.rx.clone();
         let ct = self.cancellation.clone();
 
-        iced::subscription::unfold(0, (), |_| async move {
+        iced::subscription::unfold(0, (ct, rx), |(ct, rx)| async move {
             let msg = tokio::select! {
                 msg = rx.recv_async() => { match msg  {
                     Ok(msg) => msg,
@@ -95,7 +95,7 @@ impl Application for Counter {
                 _ = ct.cancelled() => { Message::Exit }
             };
 
-            (Some(msg), ())
+            (Some(msg), (ct, rx))
         })
     }
 }
