@@ -1,11 +1,7 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Mutex, time::Duration};
 
 use anyhow::Context;
-use embedded_hal::blocking::delay::DelayUs;
+
 use rppal::i2c::I2c;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
@@ -55,7 +51,7 @@ pub enum Event {
 }
 
 pub fn run(
-    ct: CancellationToken,
+    _ct: CancellationToken,
     cmd_rx: flume::Receiver<Command>,
     evt_tx: flume::Sender<Event>,
 ) -> anyhow::Result<()> {

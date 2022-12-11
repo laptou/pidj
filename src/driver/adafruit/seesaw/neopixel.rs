@@ -111,12 +111,7 @@ pub mod color {
         }
 
         pub fn from_u8(r: u8, g: u8, b: u8) -> Color {
-            Self {
-                r,
-                g,
-                b,
-                w: 255,
-            }
+            Self { r, g, b, w: 255 }
         }
     }
 }

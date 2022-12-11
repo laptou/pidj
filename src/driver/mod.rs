@@ -1,4 +1,4 @@
-use std::{thread::Thread, time::Duration};
+use std::time::Duration;
 
 pub mod adafruit;
 

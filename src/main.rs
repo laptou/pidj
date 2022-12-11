@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let (app_cmd_tx, app_cmd_rx) = flume::bounded(256);
+    let (_app_cmd_tx, app_cmd_rx) = flume::bounded(256);
     let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
     let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
 
