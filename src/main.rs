@@ -29,17 +29,17 @@ async fn main() -> anyhow::Result<()> {
     let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
     let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
 
-    let kb_join = std::thread::spawn({
+    let kb_join = tokio::task::spawn_blocking({
         let ct = ct.clone();
         move || keyboard::run(ct, kb_cmd_rx, kb_evt_tx)
     });
 
-    let audio_join = rt.spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
-    
-    app::run(app::Flags { ct, rx: app_cmd_rx }).unwrap();
+    let audio_join = tokio::spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
+    let app_join = tokio::task::spawn_blocking(move || app::run(app::Flags { ct, rx: app_cmd_rx }).unwrap());
 
-    kb_join.join().unwrap()?;
-    rt.block_on(audio_join).unwrap()?;
+    kb_join.await.unwrap()?;
+    audio_join.await.unwrap()?;
+    app_join.await.unwrap()?;
 
     info!("exit");
 

@@ -8,10 +8,10 @@ anyhow = { version = "1.0", features = ["backtrace"] }
 bytes = "1.2.1"
 cancellation = "0.1.0"
 ctrlc = "3.2.3"
+druid = "0.7.0"
 embedded-hal = "0.2.7"
 flume = "0.10.14"
 globwalk = "0.8.1"
-iced = { version = "0.5.2", features = ["glow", "tokio"] }
 indicatif = { version = "0.17.2", features = ["rayon"] }
 num-derive = "0.3.3"
 num-traits = "0.2.15"
