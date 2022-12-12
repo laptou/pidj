@@ -11,11 +11,11 @@ anyhow = { version = "1.0", features = ["backtrace"] }
 async-walkdir = "0.2.0"
 bytes = "1.2.1"
 ctrlc = "3.2.3"
-druid = { git = "https://github.com/linebender/druid", rev = "ac38151" }
+eframe = "0.20.1"
+egui = "0.20.1"
 embedded-hal = "0.2.7"
 flume = "0.10.14"
 futures = "0.3.25"
-indicatif = { version = "0.17.2", features = ["rayon"] }
 num-derive = "0.3.3"
 num-traits = "0.2.15"
 palette = { version = "0.6.1" }

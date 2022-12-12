@@ -2,7 +2,6 @@ use std::{fs::File, future::Future, io::BufReader, path::PathBuf, sync::Arc, tim
 
 use anyhow::Context;
 use futures::stream::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use rodio::{Decoder, OutputStream, Source};
 use tokio::{
     runtime::{self, Handle, Runtime},
@@ -47,13 +46,6 @@ pub async fn run(
 
     debug!("globbing {glob_pattern:?}");
 
-    let pb_style =
-        ProgressStyle::with_template("{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}")?;
-
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(pb_style);
-    pb.set_prefix("Locating");
-
     let mut walkdir = async_walkdir::WalkDir::new(cwd.join("audio"));
     let mut paths = vec![];
 
@@ -71,8 +63,6 @@ pub async fn run(
                                 match ext.to_str() {
                                     Some("wav") | Some("flac") | Some("mp3") => {
                                         trace!("loaded file {path:?}");
-
-                                        pb.set_message(path.to_string_lossy().to_string());
                                         paths.push(path.to_path_buf());
                                     }
                                     _ => {}
@@ -88,8 +78,6 @@ pub async fn run(
     }
 
     debug!("globbed");
-
-    pb.finish_with_message("Located audio files");
 
     let (sounds, decoders): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
         paths

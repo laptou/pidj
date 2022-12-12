@@ -31,18 +31,37 @@ async fn main() -> anyhow::Result<()> {
     let (audio_cmd_tx, audio_cmd_rx) = flume::bounded(256);
     let (audio_evt_tx, audio_evt_rx) = flume::bounded(256);
 
-    let kb_join = tokio::task::spawn_blocking({
+    let kb_join = std::thread::spawn({
         let ct = ct.clone();
         move || keyboard::run(ct, kb_cmd_rx, kb_evt_tx)
     });
 
-    let audio_join = tokio::spawn(audio::run(ct.clone(), audio_cmd_rx, audio_evt_tx));
+    let async_join = std::thread::spawn({
+        let ct = ct.clone();
+        move || async_main(ct.clone(), audio_cmd_rx, audio_evt_tx)
+    });
 
-    app::run(ct, kb_cmd_tx, kb_evt_rx, audio_cmd_tx, audio_evt_rx).unwrap();
-    kb_join.await.unwrap()?;
-    audio_join.await.unwrap()?;
+    app::run(ct.clone(), kb_cmd_tx, kb_evt_rx, audio_cmd_tx, audio_evt_rx)?;
+    ct.cancel();
+
+    async_join.join().unwrap()?;
+    kb_join.join().unwrap()?;
 
     info!("exit");
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn async_main(
+    ct: CancellationToken,
+    audio_cmd_rx: flume::Receiver<audio::Command>,
+    audio_evt_tx: flume::Sender<audio::Event>,
+) -> anyhow::Result<()> {
+    let audio_join = tokio::spawn(audio::run(ct.clone(), audio_cmd_rx, audio_evt_tx));
+    audio_join.await.unwrap()?;
+
+    info!("async exit");
 
     Ok(())
 }
