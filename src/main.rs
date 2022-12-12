@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let audio_join = tokio::spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
-    let app_join = tokio::task::spawn_blocking(move || app::run(app::Flags { ct, rx: app_cmd_rx }).unwrap());
+    let app_join = tokio::task::spawn_blocking(move || app::run(app_cmd_rx));
 
     kb_join.await.unwrap()?;
     audio_join.await.unwrap()?;

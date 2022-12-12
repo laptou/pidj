@@ -1,0 +1,17 @@
+docker:
+  #!/bin/bash
+  docker build \
+  --build-arg GLIBC_VERSION=2.28 \
+  --build-arg BINUTILS_VERSION=2.37 \
+  --build-arg LINUX_SERIES=5.x \
+  --build-arg LINUX_VERSION=5.10.3 \
+  --build-arg GCC_VERSION=8.5.0 \
+  --build-arg GCC_MULTILIBS=aprofile \
+  --build-arg GCC_CONFIGURE_FLAGS="--with-float=hard" \
+  --build-arg TARGET_GCC=armv7l-linux-gnueabihf \
+  --build-arg TARGET_LINUX=arm \
+  --build-arg TARGET_DEBIAN=armhf \
+  --build-arg TARGET_PKGCONFIG=arm-linux-gnueabihf \
+  --build-arg TARGET_RUST=armv7-unknown-linux-gnueabihf \
+  --build-arg CPPFLAGS="-mfloat-abi=hard -mfpu=vfp3 -march=armv7-a" \
+  -t pidj/x-compiler:rpi3-raspbian-v1 .

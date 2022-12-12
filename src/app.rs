@@ -1,12 +1,17 @@
+use std::path::PathBuf;
+
 use druid::widget::{Button, Flex, Label};
 use druid::{AppLauncher, LocalizedString, PlatformError, Widget, WidgetExt, WindowDesc};
 
-fn run() -> Result<(), PlatformError> {
+pub fn run(rx: flume::Receiver<Message>) -> Result<(), PlatformError> {
     let main_window = WindowDesc::new(ui_builder);
     let data = 0_u32;
     AppLauncher::with_window(main_window)
-        .use_simple_logger()
         .launch(data)
+}
+
+pub enum Message {
+    NewSound { path: PathBuf }
 }
 
 fn ui_builder() -> impl Widget<u32> {
