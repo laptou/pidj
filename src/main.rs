@@ -1,5 +1,5 @@
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{info, debug};
 use tracing_subscriber::EnvFilter;
 
 mod app;
@@ -35,17 +35,16 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let audio_join = tokio::spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
-
-    // to ensure that other tasks will be cancelled if the gui crashes
-    let _cancel_guard = ct.clone().drop_guard();
-
-    app::run(app::Flags { ct, rx: app_cmd_rx })?;
-
+    // let ct = ct.clone();
+    app::run(ct, app_cmd_rx).unwrap();
     debug!("hoho1");
+
     kb_join.await.unwrap()?;
     debug!("hoho2");
     audio_join.await.unwrap()?;
     debug!("hoho3");
+    // app_join.join().unwrap()?;
+    debug!("hoho4");
 
     info!("exit");
 

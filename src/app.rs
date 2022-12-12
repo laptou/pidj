@@ -1,120 +1,110 @@
 use std::path::PathBuf;
 
-use iced::widget::{button, column, text};
-use iced::window::Mode;
-use iced::{Alignment, Application, Command, Element, Settings};
-use tokio_util::sync::CancellationToken;
+use druid::widget::{Button, Flex, Label};
+use druid::{
+    AppLauncher, Data, Lens, LocalizedString, PlatformError, Selector, Target, Widget, WidgetExt,
+    WindowDesc,
+};
+use tracing::debug;
 
-pub struct Flags {
-    pub rx: flume::Receiver<Message>,
-    pub ct: CancellationToken,
+#[derive(Data, Clone, Lens)]
+struct AppData {}
+
+struct AppDelegate;
+
+impl druid::AppDelegate<AppData> for AppDelegate {
+    fn event(
+        &mut self,
+        ctx: &mut druid::DelegateCtx,
+        window_id: druid::WindowId,
+        event: druid::Event,
+        data: &mut AppData,
+        env: &druid::Env,
+    ) -> Option<druid::Event> {
+        Some(event)
+    }
+
+    fn command(
+        &mut self,
+        ctx: &mut druid::DelegateCtx,
+        target: Target,
+        cmd: &druid::Command,
+        data: &mut AppData,
+        env: &druid::Env,
+    ) -> druid::Handled {
+        druid::Handled::No
+    }
+
+    fn window_added(
+        &mut self,
+        id: druid::WindowId,
+        data: &mut AppData,
+        env: &druid::Env,
+        ctx: &mut druid::DelegateCtx,
+    ) {
+    }
+
+    fn window_removed(
+        &mut self,
+        id: druid::WindowId,
+        data: &mut AppData,
+        env: &druid::Env,
+        ctx: &mut druid::DelegateCtx,
+    ) {
+    }
 }
 
-pub fn run(flags: Flags) -> iced::Result {
-    App::run(Settings {
-        window: iced::window::Settings {
-            always_on_top: true,
-            decorations: false,
-            ..Default::default()
-        },
-        flags,
-        antialiasing: false,
-        default_font: None,
-        default_text_size: 20,
-        exit_on_close_request: false,
-        id: None,
-        text_multithreading: true,
-        try_opengles_first: false,
-    })
-}
-
-#[derive(Debug)]
-struct App {
+pub fn run(
+    ct: tokio_util::sync::CancellationToken,
     rx: flume::Receiver<Message>,
-    cancellation: CancellationToken,
-    sounds: Vec<Sound>,
-    should_exit: bool,
-}
+) -> Result<(), PlatformError> {
+    let main_window = WindowDesc::new(ui_builder)
+        // .show_titlebar(false)
+        .set_window_state(druid::WindowState::MAXIMIZED)
+        .title("PIDJ");
 
-#[derive(Debug, Clone)]
-struct Sound {
-    path: PathBuf,
-}
+    let launcher = AppLauncher::with_window(main_window).delegate(AppDelegate);
+    let handle = launcher.get_external_handle();
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    NewSound { path: PathBuf },
-    Exit,
-}
-
-impl Application for App {
-    type Message = Message;
-    type Flags = Flags;
-
-    type Executor = iced::executor::Default;
-    type Theme = iced::Theme;
-
-    fn title(&self) -> String {
-        String::from("PI DJ")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
-            Message::NewSound { path } => {
-                self.sounds.push(Sound { path });
-            }
-            Message::Exit => {
-                self.should_exit = true;
-            }
-        }
-
-        Command::none()
-    }
-
-    fn view(&self) -> Element<Message> {
-        iced::widget::column(
-            self.sounds
-                .iter()
-                .map(|s| iced::widget::text(s.path.to_string_lossy()).into())
-                .collect(),
-        )
-        .padding(20)
-        .into()
-    }
-
-    fn new(flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
-        (
-            Self {
-                rx: flags.rx,
-                cancellation: flags.ct,
-                sounds: vec![],
-                should_exit: false,
-            },
-            iced::Command::batch([
-                iced::window::set_mode(Mode::Fullscreen),
-            ]),
-        )
-    }
-
-    fn should_exit(&self) -> bool {
-        self.should_exit
-    }
-
-    fn subscription(&self) -> iced::Subscription<Self::Message> {
-        let rx = self.rx.clone();
-        let ct = self.cancellation.clone();
-
-        iced::subscription::unfold(0, (ct, rx), |(ct, rx)| async move {
-            let msg = tokio::select! {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = ct.cancelled() => {
+                    debug!("cancelled, closing all windows");
+                    handle.submit_command(druid::commands::CLOSE_ALL_WINDOWS, (), Target::Auto).unwrap();
+                    break;
+                }
                 msg = rx.recv_async() => {
-                    match msg  {
-                        Ok(msg) => msg,
-                        Err(_) => Message::Exit,
+                    match msg {
+                        Ok(_) => {
+                            debug!("hi");
+                        },
+                        Err(_) => {
+                            debug!("channel closed, closing all windows");
+                            handle.submit_command(druid::commands::CLOSE_ALL_WINDOWS, (), Target::Auto).unwrap();
+                            break;
+                        },
                     }
                 }
-                _ = ct.cancelled() => { Message::Exit }
             };
-            (Some(msg), (ct, rx))
-        })
-    }
+        }
+    });
+
+    launcher.launch(AppData {})
+}
+
+pub enum Message {
+    NewSound { path: PathBuf },
+}
+
+fn ui_builder() -> impl Widget<AppData> {
+    // The label text will be computed dynamically based on the current locale and count
+    let text = LocalizedString::new("hello-counter")
+        .with_arg("count", |data: &AppData, _env| "fack".into());
+    let label = Label::new(text).with_text_size(50.0).padding(5.0).center();
+    let button = Button::new("increment")
+        .on_click(|_ctx, data, _env| {})
+        .padding(5.0);
+
+    Flex::column().with_child(label).with_child(button)
 }
