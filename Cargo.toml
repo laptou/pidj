@@ -12,7 +12,7 @@ druid = "0.7.0"
 embedded-hal = "0.2.7"
 flume = "0.10.14"
 futures = "0.3.25"
-globwalk = "0.8.1"
+iced = { version = "0.6", features = ["glow", "tokio"] }
 indicatif = { version = "0.17.2", features = ["rayon"] }
 num-derive = "0.3.3"
 num-traits = "0.2.15"
