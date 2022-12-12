@@ -3,6 +3,9 @@ name = "pidj"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+strip = "debuginfo"
+
 [dependencies]
 anyhow = { version = "1.0", features = ["backtrace"] }
 async-walkdir = "0.2.0"

@@ -1,4 +1,4 @@
-FROM debian:buster AS cc
+FROM debian:bullseye AS cc
 
 RUN useradd -m ccuser
 RUN mkdir -p /opt/cross
@@ -110,6 +110,13 @@ RUN apt-get update && apt-get install -y \
 	libglib2.0-dev:${TARGET_DEBIAN} libssl-dev:${TARGET_DEBIAN} \
 	libgtk-3-dev:${TARGET_DEBIAN} libasound2-dev:${TARGET_DEBIAN} libcairo2-dev:${TARGET_DEBIAN} \
 	&& rm -rf /var/lib/apt/lists/*
+
+# # install pango 1.44
+# WORKDIR "/tmp/libpango"
+# RUN curl -f -O http://ftp.gnome.org/pub/gnome/sources/pango/1.44/pango-1.44.7.tar.xz
+# RUN tar xf pango-1.44.7.tar.xz
+# WORKDIR "/tmp/libpango/pango-1.44.7"
+# RUN mkdir build && cd build && meson --prefix=/usr --sysconfdir=/etc .. && ninja && ninja install
 
 USER ccuser
 WORKDIR "/home/ccuser"

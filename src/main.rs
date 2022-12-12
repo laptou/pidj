@@ -1,5 +1,5 @@
 use tokio_util::sync::CancellationToken;
-use tracing::{info, debug};
+use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 mod app;
@@ -25,26 +25,22 @@ async fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let (app_cmd_tx, app_cmd_rx) = flume::unbounded();
     let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
     let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
+
+    let (audio_cmd_tx, audio_cmd_rx) = flume::bounded(256);
+    let (audio_evt_tx, audio_evt_rx) = flume::bounded(256);
 
     let kb_join = tokio::task::spawn_blocking({
         let ct = ct.clone();
         move || keyboard::run(ct, kb_cmd_rx, kb_evt_tx)
     });
 
-    let audio_join = tokio::spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
-    // let ct = ct.clone();
-    app::run(ct, app_cmd_rx).unwrap();
-    debug!("hoho1");
+    let audio_join = tokio::spawn(audio::run(ct.clone(), audio_cmd_rx, audio_evt_tx));
 
+    app::run(ct, kb_cmd_tx, kb_evt_rx, audio_cmd_tx, audio_evt_rx).unwrap();
     kb_join.await.unwrap()?;
-    debug!("hoho2");
     audio_join.await.unwrap()?;
-    debug!("hoho3");
-    // app_join.join().unwrap()?;
-    debug!("hoho4");
 
     info!("exit");
 

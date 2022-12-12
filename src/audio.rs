@@ -1,211 +1,176 @@
-use std::{fs::File, future::Future, io::BufReader, path::PathBuf, time::Duration};
+use std::{fs::File, future::Future, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rodio::{Decoder, OutputStream, Source};
-use tokio::{sync::oneshot, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, trace};
-
-use crate::{
-    app,
-    driver::adafruit::seesaw::{keypad::Edge, neopixel::Color},
-    keyboard,
+use tokio::{
+    runtime::{self, Handle, Runtime},
+    sync::{oneshot, Mutex},
+    task::LocalSet,
 };
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, info, trace, warn};
 
-#[derive(Debug, Clone, Copy)]
-pub enum Command {}
+#[derive(Debug, Clone)]
+pub enum Command {
+    Play { sound_id: SoundId },
+}
 
-#[derive(Debug, Clone, Copy)]
-pub enum Event {}
+#[derive(Debug, Clone)]
+pub enum Event {
+    LoadingStart,
+    LoadingEnd { sounds: Vec<SoundInfo> },
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Copy)]
+pub struct SoundId(pub usize);
+
+#[derive(Debug, Clone)]
+pub struct SoundInfo {
+    pub id: SoundId,
+    pub path: PathBuf,
+    pub duration: Option<Duration>,
+}
 
 pub async fn run(
     ct: CancellationToken,
-    app_msg_tx: flume::Sender<app::Message>,
-    kb_cmd_tx: flume::Sender<keyboard::Command>,
-    kb_evt_rx: flume::Receiver<keyboard::Event>,
+    cmd_rx: flume::Receiver<Command>,
+    event_tx: flume::Sender<Event>,
 ) -> anyhow::Result<()> {
-    let loading_token = ct.child_token();
+    let _ = event_tx.send(Event::LoadingStart);
 
-    let (paths, stream_handle) = {
-        start_loading_animation(loading_token.clone(), kb_cmd_tx.clone());
-        let _guard = loading_token.drop_guard();
+    info!("locating audio files");
 
-        info!("locating audio files");
+    let cwd = std::env::current_dir()?;
+    let glob_pattern = cwd.to_string_lossy().to_string() + "/audio/**/*.{wav,flac,mp3}";
 
-        let cwd = std::env::current_dir()?;
-        let glob_pattern = cwd.to_string_lossy().to_string() + "/audio/**/*.{wav,flac,mp3}";
+    debug!("globbing {glob_pattern:?}");
 
-        debug!("globbing {glob_pattern:?}");
+    let pb_style =
+        ProgressStyle::with_template("{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}")?;
 
-        let pb_style = ProgressStyle::with_template(
-            "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
-        )?;
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(pb_style);
+    pb.set_prefix("Locating");
 
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(pb_style);
-        pb.set_prefix("Locating");
-
-        let mut walkdir = async_walkdir::WalkDir::new(cwd.join("audio"));
-        let mut paths = vec![];
-
-        loop {
-            tokio::select! {
-                _ = ct.cancelled() => { break; }
-                entry = walkdir.next() => {
-                    match entry {
-                        Some(entry) => {
-
-                            let entry = entry?;
-                            let path = entry.path();
-                            let _ = app_msg_tx.send(app::Message::NewSound {
-                                path: path.to_owned(),
-                            });
-
-                            trace!("loaded file {path:?}");
-
-                            pb.set_message(path.to_string_lossy().to_string());
-                            paths.push(path.to_path_buf());
-                        }
-                        None => { break; }
-                    }
-                }
-            }
-        }
-
-        debug!("globbed");
-
-        pb.finish_with_message("Located audio files");
-
-        let (_stream, stream_handle) = OutputStream::try_default()
-            .context("no audio output stream available")
-            .unwrap();
-
-        debug!("opened audio output");
-
-        (paths, stream_handle)
-    };
-
-    info!("loaded audio files");
+    let mut walkdir = async_walkdir::WalkDir::new(cwd.join("audio"));
+    let mut paths = vec![];
 
     loop {
         tokio::select! {
             _ = ct.cancelled() => { break; }
-            kb_evt = kb_evt_rx.recv_async() => {
-                match kb_evt {
-                    Ok(evt) => match evt {
-                        keyboard::Event::Key(evt) => {
-                            if let Edge::Rising = evt.edge {
-                                let sound_idx = (evt.key.0 * 4 + evt.key.1) as usize;
+            entry = walkdir.next() => {
+                match entry {
+                    Some(entry) => {
+                        let entry = entry?;
+                        let path = entry.path();
 
-                                let path = match paths.get(sound_idx) {
-                                    Some(path) => path,
-                                    None => continue,
-                                };
+                        match path.extension() {
+                            Some(ext) => {
+                                match ext.to_str() {
+                                    Some("wav") | Some("flac") | Some("mp3") => {
+                                        trace!("loaded file {path:?}");
 
-                                debug!("key {:?} pressed, playing sound from {path:?}", evt.key);
-
-                                let file = File::open(path).context("failed to open audio file")?;
-                                let reader = BufReader::new(file);
-                                let decoder =
-                                    Decoder::new(reader).context("failed to decode audio file")?;
-
-                                stream_handle
-                                    .play_raw(decoder.convert_samples())
-                                    .context("failed to play sound")?;
-
-                                let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                                    x: evt.key.0,
-                                    y: evt.key.1,
-                                    state: keyboard::PixelState::FadeExp {
-                                        from: Color::from_f32(1., 0., 0.),
-                                        to: Color::WHITE,
-                                        duration: Duration::from_secs(1),
-                                        progress: 0.,
-                                    },
-                                });
+                                        pb.set_message(path.to_string_lossy().to_string());
+                                        paths.push(path.to_path_buf());
+                                    }
+                                    _ => {}
+                                }
                             }
+                            _ => {}
                         }
-                    },
-
-                    Err(_) => break,
+                    }
+                    None => { break; }
                 }
             }
         }
     }
 
+    debug!("globbed");
+
+    pb.finish_with_message("Located audio files");
+
+    let (sounds, decoders): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
+        paths
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| -> anyhow::Result<_> {
+                let file = File::open(&path).context("failed to open audio file")?;
+                let reader = BufReader::new(file);
+                let decoder = Decoder::new(reader)
+                    .with_context(|| format!("failed to decode audio file {:?}", path))?;
+                let decoder = decoder.convert_samples::<f32>().buffered();
+
+                let sound = SoundInfo {
+                    id: SoundId(index),
+                    path,
+                    duration: decoder.total_duration(),
+                };
+
+                Ok((sound, decoder))
+            })
+            .filter_map(|r| match r {
+                Ok(r) => Some(r),
+                Err(err) => {
+                    warn!("failed to load sound: {err:?}");
+                    None
+                }
+            })
+            .unzip()
+    });
+
+    let _ = event_tx.send(Event::LoadingEnd { sounds });
+
+    info!("loaded audio files");
+
+    // rodio::OutputStream is !Send and !Sync, but if it is dropped, then the
+    // rodio::OutputStreamHandle will stop working. This is the easiest way to
+    // pin it to a single thread.
+
+    let (tx, rx) = oneshot::channel();
+
+    std::thread::spawn(move || {
+        let rt = runtime::Builder::new_current_thread()
+            .build()
+            .expect("failed to construct tokio runtime");
+
+        let result = rt.block_on(async {
+            let (_stream, stream_handle) =
+                OutputStream::try_default().context("no audio output stream available")?;
+
+            debug!("opened audio output");
+
+            loop {
+                tokio::select! {
+                    _ = ct.cancelled() => { break; }
+                    cmd = cmd_rx.recv_async() => {
+                        match cmd {
+                            Ok(cmd) => match cmd {
+                                Command::Play { sound_id } => {
+                                    debug!("playing sound {sound_id:?}");
+
+                                    stream_handle
+                                        .play_raw(decoders[sound_id.0].clone())
+                                        .context("failed to play sound")?;
+                                }
+                            },
+
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+
+            Ok::<_, anyhow::Error>(())
+        });
+
+        let _ = tx.send(result);
+    });
+
+    rx.await??;
+
     debug!("exiting audio loop");
 
     Ok(())
-}
-
-fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keyboard::Command>) {
-    std::thread::spawn(move || {
-        debug!("initializing loading animation");
-
-        for x in 0..4 {
-            for y in 0..4 {
-                let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                    x,
-                    y,
-                    state: keyboard::PixelState::Solid {
-                        color: Color::from_f32(0., 0., 0.3),
-                        update: true,
-                    },
-                });
-            }
-        }
-
-        let mut highlight = 0;
-
-        while !ct.is_cancelled() {
-            let x = highlight % 4;
-            let y = highlight / 4;
-
-            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                x,
-                y,
-                state: keyboard::PixelState::Solid {
-                    color: Color::from_f32(0., 0.1, 0.3),
-                    update: true,
-                },
-            });
-
-            highlight = (highlight + 1) % 16;
-
-            let x = highlight % 4;
-            let y = highlight / 4;
-
-            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                x,
-                y,
-                state: keyboard::PixelState::Solid {
-                    color: Color::from_f32(0., 0.2, 0.7),
-                    update: true,
-                },
-            });
-
-            trace!("loading animation step");
-
-            std::thread::sleep(Duration::from_millis(1000));
-        }
-
-        debug!("exiting loading animation");
-
-        for x in 0..4 {
-            for y in 0..4 {
-                let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                    x,
-                    y,
-                    state: keyboard::PixelState::Solid {
-                        color: Color::WHITE,
-                        update: true,
-                    },
-                });
-            }
-        }
-
-        debug!("exited loading animation");
-    });
 }
