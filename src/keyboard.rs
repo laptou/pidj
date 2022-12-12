@@ -95,82 +95,87 @@ pub fn run(
 
                 let mut interval = Interval::new(Duration::from_millis(1000 / 60));
 
-                    debug!("running keyboard colour loop");
+                debug!("running keyboard colour loop");
 
                 while !ct.is_cancelled() {
                     interval.tick();
-                    let mut nt = nt.lock().unwrap();
+                    {
+                        let mut nt = nt.lock().unwrap();
 
-                    for (i, state) in pixel_states.iter_mut().enumerate() {
-                        let x = (i % 4) as u16;
-                        let y = (i / 4) as u16;
+                        for (i, state) in pixel_states.iter_mut().enumerate() {
+                            let x = (i % 4) as u16;
+                            let y = (i / 4) as u16;
 
-                        match state {
-                            // solid color pixels -> do nothing
-                            PixelState::Solid { color, update } => {
-                                if *update {
-                                    nt.set_pixel_color(x, y, *color)?;
-                                    *update = false;
+                            match state {
+                                // solid color pixels -> do nothing
+                                PixelState::Solid { color, update } => {
+                                    if *update {
+                                        nt.set_pixel_color(x, y, *color)?;
+                                        *update = false;
+                                    }
                                 }
-                            }
-                            // fading pixels -> update
-                            PixelState::FadeLinear {
-                                from,
-                                to,
-                                duration,
-                                progress,
-                            } => {
-                                *progress += duration.as_secs_f64();
+                                // fading pixels -> update
+                                PixelState::FadeLinear {
+                                    from,
+                                    to,
+                                    duration,
+                                    progress,
+                                } => {
+                                    *progress += duration.as_secs_f64();
 
-                                let p = *progress;
-                                let rp = 1. - p;
+                                    let p = *progress;
+                                    let rp = 1. - p;
 
-                                if p < 1. {
-                                    let current = Color {
-                                        r: (from.r as f64 * rp + to.r as f64 * p) as u8,
-                                        g: (from.g as f64 * rp + to.g as f64 * p) as u8,
-                                        b: (from.b as f64 * rp + to.b as f64 * p) as u8,
-                                        w: (from.w as f64 * rp + to.w as f64 * p) as u8,
-                                    };
+                                    if p < 1. {
+                                        let current = Color {
+                                            r: (from.r as f64 * rp + to.r as f64 * p) as u8,
+                                            g: (from.g as f64 * rp + to.g as f64 * p) as u8,
+                                            b: (from.b as f64 * rp + to.b as f64 * p) as u8,
+                                            w: (from.w as f64 * rp + to.w as f64 * p) as u8,
+                                        };
 
-                                    nt.set_pixel_color(x, y, current)?;
-                                } else {
-                                    nt.set_pixel_color(x, y, *to)?;
-                                    *state = PixelState::Solid {
-                                        color: *to,
-                                        update: true,
-                                    };
+                                        nt.set_pixel_color(x, y, current)?;
+                                    } else {
+                                        nt.set_pixel_color(x, y, *to)?;
+                                        *state = PixelState::Solid {
+                                            color: *to,
+                                            update: true,
+                                        };
+                                    }
                                 }
-                            }
-                            PixelState::FadeExp {
-                                from,
-                                to,
-                                duration,
-                                progress,
-                            } => {
-                                *progress += duration.as_secs_f64();
+                                PixelState::FadeExp {
+                                    from,
+                                    to,
+                                    duration,
+                                    progress,
+                                } => {
+                                    *progress += duration.as_secs_f64();
 
-                                let p = *progress;
-                                let p = p * p * p;
-                                let rp = 1. - p;
+                                    let p = *progress;
+                                    let p = p * p * p;
+                                    let rp = 1. - p;
 
-                                if p < 1. {
-                                    let current = Color {
-                                        r: (from.r as f64 * rp + to.r as f64 * p) as u8,
-                                        g: (from.g as f64 * rp + to.g as f64 * p) as u8,
-                                        b: (from.b as f64 * rp + to.b as f64 * p) as u8,
-                                        w: (from.w as f64 * rp + to.w as f64 * p) as u8,
-                                    };
+                                    if p < 1. {
+                                        let current = Color {
+                                            r: (from.r as f64 * rp + to.r as f64 * p) as u8,
+                                            g: (from.g as f64 * rp + to.g as f64 * p) as u8,
+                                            b: (from.b as f64 * rp + to.b as f64 * p) as u8,
+                                            w: (from.w as f64 * rp + to.w as f64 * p) as u8,
+                                        };
 
-                                    nt.set_pixel_color(x, y, current)?;
-                                } else {
-                                    *state = PixelState::Solid {
-                                        color: *to,
-                                        update: true,
-                                    };
+                                        nt.set_pixel_color(x, y, current)?;
+                                    } else {
+                                        *state = PixelState::Solid {
+                                            color: *to,
+                                            update: true,
+                                        };
+                                    }
                                 }
                             }
                         }
+
+                        std::thread::sleep(Duration::from_micros(300));
+                        nt.show()?;
                     }
 
                     match cmd_rx.try_recv() {
@@ -198,9 +203,6 @@ pub fn run(
                         }
                         Err(flume::TryRecvError::Disconnected) => break,
                     };
-
-                    // tokio::time::sleep(Duration::from_micros(300)).await;
-                    nt.show()?;
                 }
 
                 debug!("exiting keyboard colour loop");

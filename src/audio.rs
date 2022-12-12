@@ -1,15 +1,17 @@
-use std::{fs::File, io::BufReader, time::Duration};
+use std::{fs::File, future::Future, io::BufReader, path::PathBuf, time::Duration};
 
 use anyhow::Context;
+use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rodio::{Decoder, OutputStream, Source};
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 use crate::{
+    app,
     driver::adafruit::seesaw::{keypad::Edge, neopixel::Color},
-    keyboard, app,
+    keyboard,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -33,37 +35,56 @@ pub async fn run(
         info!("locating audio files");
 
         let cwd = std::env::current_dir()?;
-        let glob_pattern = cwd.to_string_lossy() + "/**/*.{wav,flac,mp3}";
+        let glob_pattern = cwd.to_string_lossy().to_string() + "/audio/**/*.{wav,flac,mp3}";
 
         debug!("globbing {glob_pattern:?}");
 
-        let pb_style = ProgressStyle::with_template(
-            "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
-        )
-        .unwrap();
+        // let pb_style = ProgressStyle::with_template(
+        //     "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
+        // )?;
 
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(pb_style);
-        pb.set_prefix("Locating");
+        // let pb = ProgressBar::new_spinner();
+        // pb.set_style(pb_style);
+        // pb.set_prefix("Locating");
+        let mut walkdir = async_walkdir::WalkDir::new(cwd.join("audio"));
+        let mut paths = vec![];
 
-        let paths = globwalk::glob(glob_pattern)?
-            .map(|entry| -> anyhow::Result<_> {
-                let entry = entry?;
-                let path = entry.path();
-                let _ = app_msg_tx.send(app::Message::NewSound { path: path.to_owned() });
-                pb.set_message(path.to_string_lossy().to_string());
-                Ok(path.to_path_buf())
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .context("failed to locate audio files")?;
+        loop {
+            tokio::select! {
+                _ = ct.cancelled() => { break; }
+                entry = walkdir.next() => {
+                    match entry {
+                        Some(entry) => {
+                            let entry = entry?;
+                            let path = entry.path();
+                            let _ = app_msg_tx.send(app::Message::NewSound {
+                                path: path.to_owned(),
+                            });
+                            trace!("loaded file {path:?}");
 
-        pb.finish_with_message("Located audio files");
+                            // pb.set_message(path.to_string_lossy().to_string());
+                            paths.push(path.to_path_buf());
+                        }
+                        None => { break; }
+                    }
+                }
+            }
+        }
 
-        let (_stream, stream_handle) =
-            OutputStream::try_default().context("no audio output stream available")?;
+        debug!("globbed");
+
+        // pb.finish_with_message("Located audio files");
+
+        let (_stream, stream_handle) = OutputStream::try_default()
+            .context("no audio output stream available")
+            .unwrap();
+
+        debug!("opened audio output");
 
         (paths, stream_handle)
     };
+
+    info!("loaded audio files");
 
     loop {
         tokio::select! {
@@ -117,7 +138,9 @@ pub async fn run(
 }
 
 fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keyboard::Command>) {
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
+        debug!("initializing loading animation");
+
         for x in 0..4 {
             for y in 0..4 {
                 let _ = kb_cmd_tx.send(keyboard::Command::SetState {
@@ -160,8 +183,12 @@ fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keybo
                 },
             });
 
-            tokio::time::sleep(Duration::from_millis(250)).await;
+            trace!("loading animation step");
+
+            std::thread::sleep(Duration::from_millis(1000));
         }
+
+        debug!("exiting loading animation");
 
         for x in 0..4 {
             for y in 0..4 {
@@ -175,5 +202,7 @@ fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keybo
                 });
             }
         }
+
+        debug!("exited loading animation");
     });
 }

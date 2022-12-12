@@ -3,6 +3,6 @@
     "docker", "run", "--rm", "-v", "${workspaceFolder}:/app", "-v", "/home/ibiyemi/.cargo/registry:/home/ccuser/.cargo/registry", "-v", "/home/ibiyemi/.cargo/git:/home/ccuser/.cargo/git", "pidj/x-compiler:rpi3-raspbian-v1", "cargo", "check", "--quiet", "--workspace", "--message-format=json"
   ],
   "rust-analyzer.cargo.buildScripts.overrideCommand": [
-    "docker", "run", "--rm", "-v", "${workspaceFolder}:/app", "-v", "/home/ibiyemi/.cargo/registry:/home/ccuser/.cargo/registry", "-v", "/home/ibiyemi/.cargo/git:/home/ccuser/.cargo/git", "pidj/x-compiler:rpi3-raspbian-v1", "cargo", "check", "--quiet", "--workspace", "--message-format=json"
+    "cargo", "check", "--quiet", "--workspace", "--message-format=json", "--target", "x86_64-unknown-linux-gnu"
   ]
 }
