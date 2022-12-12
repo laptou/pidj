@@ -1,11 +1,4 @@
-use std::{
-    ffi::OsStr,
-    fs::File,
-    future::Future,
-    io::BufReader,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs::File, future::Future, io::BufReader, path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use futures::stream::StreamExt;
@@ -46,24 +39,44 @@ pub async fn run(
 
         debug!("globbing {glob_pattern:?}");
 
-        // let pb_style = ProgressStyle::with_template(
-        //     "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
-        // )?;
+        let pb_style = ProgressStyle::with_template(
+            "{prefix:>12.cyan.bold} [{spinner}] {pos}/{len} {wide_msg}",
+        )?;
 
-        // let pb = ProgressBar::new_spinner();
-        // pb.set_style(pb_style);
-        // pb.set_prefix("Locating");
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(pb_style);
+        pb.set_prefix("Locating");
 
-        let paths = tokio::select! {
-            _ = ct.cancelled() => { return Ok(()); }
-            res = walkdir(cwd.join("audio"), &["wav", "flac", "mp3"]) => {
-                res?
+        let mut walkdir = async_walkdir::WalkDir::new(cwd.join("audio"));
+        let mut paths = vec![];
+
+        loop {
+            tokio::select! {
+                _ = ct.cancelled() => { break; }
+                entry = walkdir.next() => {
+                    match entry {
+                        Some(entry) => {
+
+                            let entry = entry?;
+                            let path = entry.path();
+                            let _ = app_msg_tx.send(app::Message::NewSound {
+                                path: path.to_owned(),
+                            });
+
+                            trace!("loaded file {path:?}");
+
+                            pb.set_message(path.to_string_lossy().to_string());
+                            paths.push(path.to_path_buf());
+                        }
+                        None => { break; }
+                    }
+                }
             }
-        };
+        }
 
         debug!("globbed");
 
-        // pb.finish_with_message("Located audio files");
+        pb.finish_with_message("Located audio files");
 
         let (_stream, stream_handle) = OutputStream::try_default()
             .context("no audio output stream available")
@@ -125,44 +138,6 @@ pub async fn run(
     debug!("exiting audio loop");
 
     Ok(())
-}
-
-async fn walkdir(
-    path: impl AsRef<Path>,
-    extensions: &[impl AsRef<OsStr>],
-) -> anyhow::Result<Vec<PathBuf>> {
-    let mut current_paths = vec![path.as_ref().to_owned()];
-    let mut selected_files = vec![];
-
-    while let Some(current_path) = current_paths.pop() {
-        let mut readdir = tokio::fs::read_dir(&current_path)
-            .await
-            .context("failed to read directory {current_path:?}")?;
-        while let Some(current_file) = readdir
-            .next_entry()
-            .await
-            .context("failed to get next file in directory {current_path:?}")?
-        {
-            let ft = current_file.file_type().await?;
-
-            if ft.is_file() {
-                if let Some(extension) = current_file.path().extension() {
-                    for allowed_extension in extensions {
-                        if allowed_extension.as_ref() == extension {
-                            selected_files.push(current_file.path());
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if ft.is_dir() {
-                current_paths.push(current_file.path());
-            }
-        }
-    }
-
-    Ok(selected_files)
 }
 
 fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keyboard::Command>) {

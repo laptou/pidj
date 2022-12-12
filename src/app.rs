@@ -67,8 +67,6 @@ pub fn run(
     let handle = launcher.get_external_handle();
 
     tokio::spawn(async move {
-        debug!("hoho");
-        
         loop {
             tokio::select! {
                 _ = ct.cancelled() => {
