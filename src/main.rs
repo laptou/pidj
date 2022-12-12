@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let (_app_cmd_tx, app_cmd_rx) = flume::bounded(256);
+    let (app_cmd_tx, app_cmd_rx) = flume::bounded(256);
     let (kb_cmd_tx, kb_cmd_rx) = flume::bounded(256);
     let (kb_evt_tx, kb_evt_rx) = flume::bounded(256);
 
@@ -33,11 +33,13 @@ async fn main() -> anyhow::Result<()> {
         let ct = ct.clone();
         move || keyboard::run(ct, kb_cmd_rx, kb_evt_tx)
     });
-    let audio_join = audio::spawn_thread(ct.clone(), kb_cmd_tx, kb_evt_rx);
+
+    let audio_join = rt.spawn(audio::run(ct.clone(), app_cmd_tx, kb_cmd_tx, kb_evt_rx));
+    
     app::run(app::Flags { ct, rx: app_cmd_rx }).unwrap();
 
     kb_join.join().unwrap()?;
-    audio_join.await.unwrap()?;
+    rt.block_on(audio_join).unwrap()?;
 
     info!("exit");
 

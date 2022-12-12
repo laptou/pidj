@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use iced::widget::{button, column, text};
 use iced::window::Mode;
 use iced::{Alignment, Application, Command, Element, Settings};
@@ -9,7 +11,7 @@ pub struct Flags {
 }
 
 pub fn run(flags: Flags) -> iced::Result {
-    Counter::run(Settings {
+    App::run(Settings {
         window: iced::window::Settings {
             always_on_top: true,
             decorations: false,
@@ -26,19 +28,26 @@ pub fn run(flags: Flags) -> iced::Result {
     })
 }
 
-struct Counter {
+#[derive(Debug)]
+struct App {
     rx: flume::Receiver<Message>,
     cancellation: CancellationToken,
+    sounds: Vec<Sound>,
+    should_exit: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+struct Sound {
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
-    IncrementPressed,
-    DecrementPressed,
+    NewSound { path: PathBuf },
     Exit,
 }
 
-impl Application for Counter {
+impl Application for App {
     type Message = Message;
     type Flags = Flags;
 
@@ -51,20 +60,25 @@ impl Application for Counter {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            _ => {}
+            Message::NewSound { path } => {
+                self.sounds.push(Sound { path });
+            }
+            Message::Exit => {
+                self.should_exit = true;
+            }
         }
 
         Command::none()
     }
 
     fn view(&self) -> Element<Message> {
-        column![
-            button("Increment").on_press(Message::IncrementPressed),
-            text("penis").size(50),
-            button("Decrement").on_press(Message::DecrementPressed)
-        ]
+        iced::widget::column(
+            self.sounds
+                .iter()
+                .map(|s| iced::widget::text(s.path.to_string_lossy()).into())
+                .collect(),
+        )
         .padding(20)
-        .align_items(Alignment::Center)
         .into()
     }
 
@@ -73,13 +87,20 @@ impl Application for Counter {
             Self {
                 rx: flags.rx,
                 cancellation: flags.ct,
+                sounds: vec![],
+                should_exit: false,
             },
-            iced::window::set_mode(Mode::Fullscreen),
+            iced::Command::batch([
+                iced::window::set_mode(Mode::Fullscreen),
+                iced::Command::perform(async move {
+
+                }, |_| ())
+            ])
         )
     }
 
     fn should_exit(&self) -> bool {
-        self.cancellation.is_cancelled()
+        self.should_exit
     }
 
     fn subscription(&self) -> iced::Subscription<Self::Message> {
@@ -88,10 +109,12 @@ impl Application for Counter {
 
         iced::subscription::unfold(0, (ct, rx), |(ct, rx)| async move {
             let msg = tokio::select! {
-                msg = rx.recv_async() => { match msg  {
-                    Ok(msg) => msg,
-                    Err(_) => Message::Exit,
-                }}
+                msg = rx.recv_async() => { 
+                    match msg  {
+                        Ok(msg) => msg,
+                        Err(_) => Message::Exit,
+                    }
+                }
                 _ = ct.cancelled() => { Message::Exit }
             };
 

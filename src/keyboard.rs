@@ -51,7 +51,7 @@ pub enum Event {
 }
 
 pub fn run(
-    _ct: CancellationToken,
+    ct: CancellationToken,
     cmd_rx: flume::Receiver<Command>,
     evt_tx: flume::Sender<Event>,
 ) -> anyhow::Result<()> {
@@ -83,6 +83,7 @@ pub fn run(
     std::thread::scope(|s| {
         s.spawn({
             let nt = &nt;
+            let ct = ct.clone();
             move || -> anyhow::Result<()> {
                 let mut pixel_states = vec![
                     PixelState::Solid {
@@ -94,7 +95,9 @@ pub fn run(
 
                 let mut interval = Interval::new(Duration::from_millis(1000 / 60));
 
-                loop {
+                    debug!("running keyboard colour loop");
+
+                while !ct.is_cancelled() {
                     interval.tick();
                     let mut nt = nt.lock().unwrap();
 
@@ -200,7 +203,7 @@ pub fn run(
                     nt.show()?;
                 }
 
-                debug!("exiting keyboard loop");
+                debug!("exiting keyboard colour loop");
 
                 Ok(())
             }
@@ -209,11 +212,13 @@ pub fn run(
         s.spawn({
             let nt = &nt;
             move || -> anyhow::Result<()> {
+                debug!("starting keyboard event loop");
+
                 // sample keyboard for events at 120Hz
 
                 let mut interval = Interval::new(Duration::from_millis(1000 / 120));
 
-                loop {
+                while !ct.is_cancelled() {
                     interval.tick();
                     let mut nt = nt.lock().unwrap();
 
@@ -222,9 +227,15 @@ pub fn run(
                         let _ = evt_tx.send(Event::Key(evt));
                     }
                 }
+
+                debug!("exiting keyboard event loop");
+
+                Ok(())
             }
         });
     });
+
+    debug!("keyboard task exited");
 
     Ok(())
 }
