@@ -15,7 +15,7 @@ use crate::driver::adafruit::seesaw::neopixel::Color;
 use crate::{audio, keyboard};
 
 #[derive(Data, Clone)]
-enum AppData {
+enum AppState {
     Loading(LoadingState),
     FreePlay(FreePlayState),
 }
@@ -37,11 +37,18 @@ struct FreePlayState {
     sounds: Vec<SoundInfo>,
 
     // 3 rows, 4 columns, b/c top row is reserved for fn keys
-    bindings: [[FreePlayBinding; 4]; 3],
+    sound_keys: [[SoundKeyState; 4]; 3],
+
+    fn_keys: [FnKeyState; 4],
 }
 
 #[derive(Data, Clone, Default)]
-struct FreePlayBinding {
+struct FnKeyState {
+    pressed: bool,
+}
+
+#[derive(Data, Clone, Default)]
+struct SoundKeyState {
     #[data(eq)]
     binding: Option<SoundId>,
     pressed: bool,
@@ -49,13 +56,13 @@ struct FreePlayBinding {
 
 struct AppDelegate;
 
-impl druid::AppDelegate<AppData> for AppDelegate {
+impl druid::AppDelegate<AppState> for AppDelegate {
     fn event(
         &mut self,
         ctx: &mut druid::DelegateCtx,
         window_id: druid::WindowId,
         event: druid::Event,
-        data: &mut AppData,
+        data: &mut AppState,
         env: &druid::Env,
     ) -> Option<druid::Event> {
         Some(event)
@@ -66,7 +73,7 @@ impl druid::AppDelegate<AppData> for AppDelegate {
         ctx: &mut druid::DelegateCtx,
         target: Target,
         cmd: &druid::Command,
-        data: &mut AppData,
+        data: &mut AppState,
         env: &druid::Env,
     ) -> druid::Handled {
         druid::Handled::No
@@ -76,7 +83,7 @@ impl druid::AppDelegate<AppData> for AppDelegate {
         &mut self,
         id: druid::WindowId,
         handle: druid::WindowHandle,
-        data: &mut AppData,
+        data: &mut AppState,
         env: &druid::Env,
         ctx: &mut druid::DelegateCtx,
     ) {
@@ -85,7 +92,7 @@ impl druid::AppDelegate<AppData> for AppDelegate {
     fn window_removed(
         &mut self,
         id: druid::WindowId,
-        data: &mut AppData,
+        data: &mut AppState,
         env: &druid::Env,
         ctx: &mut druid::DelegateCtx,
     ) {
@@ -166,7 +173,7 @@ pub fn run(
         }
     });
 
-    launcher.launch(AppData::Loading(LoadingState {
+    launcher.launch(AppState::Loading(LoadingState {
         animation_cancel: loading_anim_ct,
     }))
 }
@@ -240,9 +247,14 @@ fn update_keyboard_freeplay(state: &FreePlayState, kb_cmd_tx: flume::Sender<keyb
 
     for x in 0..4 {
         for y in 1..4 {
-            let key_state = match state.bindings[y - 1][x].binding {
+            let key_state = match state.sound_keys[y - 1][x].binding {
                 Some(_) => keyboard::PixelState::Solid {
-                    color: Color { r: 128, g: 128, b: 128, w: 0 },
+                    color: Color {
+                        r: 50,
+                        g: 50,
+                        b: 50,
+                        w: 0,
+                    },
                     update: true,
                 },
                 None => keyboard::PixelState::Solid {
@@ -269,17 +281,17 @@ fn on_audio_event(handle: &ExtEventSink, channels: &Channels, evt: audio::Event)
             let kb_cmd_tx = kb_cmd_tx.clone();
             handle.add_idle_callback(move |data| {
                 match data {
-                    AppData::Loading(LoadingState { animation_cancel }) => {
+                    AppState::Loading(LoadingState { animation_cancel }) => {
                         animation_cancel.cancel()
                     }
-                    other => {
+                    _ => {
                         panic!(
                             "received audio::Event::LoadingEnd, but app was not in loading state"
                         );
                     }
                 }
 
-                let mut default_bindings: [[FreePlayBinding; 4]; 3] = Default::default();
+                let mut default_bindings: [[SoundKeyState; 4]; 3] = Default::default();
 
                 for x in 0..4 {
                     for y in 0..3 {
@@ -289,28 +301,25 @@ fn on_audio_event(handle: &ExtEventSink, channels: &Channels, evt: audio::Event)
 
                 let inner = FreePlayState {
                     sounds,
-                    bindings: default_bindings,
+                    sound_keys: default_bindings,
                 };
 
                 update_keyboard_freeplay(&inner, kb_cmd_tx.clone());
 
-                *data = AppData::FreePlay(inner);
+                *data = AppState::FreePlay(inner);
             });
         }
     }
 }
 
 fn on_keyboard_event(handle: &ExtEventSink, channels: &Channels, evt: keyboard::Event) {
-    let kb_cmd_tx = channels.kb_cmd_tx.clone();
-    let audio_cmd_tx = channels.audio_cmd_tx.clone();
-
     match evt {
         keyboard::Event::Key(key) => {
             handle.add_idle_callback({
                 let audio_cmd_tx = channels.audio_cmd_tx.clone();
                 move |data| match data {
-                    AppData::Loading(_) => {}
-                    AppData::FreePlay(data) => {
+                    AppState::Loading(_) => {}
+                    AppState::FreePlay(data) => {
                         let (x, y) = key.key;
                         let x = x as usize;
                         let y = y as usize;
@@ -318,17 +327,18 @@ fn on_keyboard_event(handle: &ExtEventSink, channels: &Channels, evt: keyboard::
                         if y > 0 {
                             match key.edge {
                                 keypad::Edge::High | keypad::Edge::Rising => {
-                                    data.bindings[(y - 1)][x].pressed = true;
+                                    data.sound_keys[(y - 1)][x].pressed = true;
 
-                                    match data.bindings[(y - 1)][x].binding {
+                                    match data.sound_keys[(y - 1)][x].binding {
                                         Some(id) => {
-                                            let _ = audio_cmd_tx.send(audio::Command::Play { sound_id: id });
+                                            let _ = audio_cmd_tx
+                                                .send(audio::Command::Play { sound_id: id });
                                         }
                                         _ => {}
                                     }
                                 }
                                 keypad::Edge::Low | keypad::Edge::Falling => {
-                                    data.bindings[(y - 1)][x].pressed = false;
+                                    data.sound_keys[(y - 1)][x].pressed = false;
                                 }
                             }
                         }
@@ -339,14 +349,14 @@ fn on_keyboard_event(handle: &ExtEventSink, channels: &Channels, evt: keyboard::
     }
 }
 
-fn ui_builder() -> impl Widget<AppData> {
+fn ui_builder() -> impl Widget<AppState> {
     let ui = ViewSwitcher::new(
-        |data: &AppData, env| match data {
-            AppData::Loading(_) => 0,
-            AppData::FreePlay(_) => 1,
+        |data: &AppState, _| match data {
+            AppState::Loading(_) => 0,
+            AppState::FreePlay(_) => 1,
         },
-        |_, data, env| match data {
-            AppData::Loading(_) => Box::new(
+        |_, data, _| match data {
+            AppState::Loading(_) => Box::new(
                 Align::centered(
                     Label::new("LOADING")
                         .with_text_size(30.0)
@@ -356,71 +366,76 @@ fn ui_builder() -> impl Widget<AppData> {
                 .background(druid::Color::rgb8(0, 0, 255))
                 .expand(),
             ),
-            AppData::FreePlay(FreePlayState { sounds, bindings }) => {
-                let mut grid = Flex::column();
-
-                // fn row
-                grid.add_flex_child(
-                    {
-                        let mut row = Flex::row();
-
-                        for i in 0..4 {
-                            let cell = Align::centered(
-                                Label::new(format!("F{i}"))
-                                    .with_text_size(30.0)
-                                    .with_text_alignment(druid::TextAlignment::Center)
-                                    .with_text_color(druid::Color::BLACK),
-                            )
-                            .background(druid::Color::WHITE);
-                            row.add_flex_child(cell.expand(), 1.0);
-                        }
-
-                        row.expand()
-                    },
-                    1.0,
-                );
-
-                debug!("ree");
-
-                // binding rows
-                for i in 0..3 {
-                    // fn row
-                    grid.add_flex_child(
-                        {
-                            let mut row = Flex::row();
-
-                            for j in 0..4 {
-                                let binding = &bindings[i][j];
-
-                                let text = match binding.binding {
-                                    Some(binding) => {
-                                        format!("S{}", binding.0)
-                                    }
-                                    None => {
-                                        format!("??")
-                                    }
-                                };
-
-                                let mut cell = Label::new(text)
-                                    .with_text_size(30.0)
-                                    .with_text_alignment(druid::TextAlignment::Center);
-
-                                if binding.pressed {
-                                    cell.set_text_color(druid::Color::rgb8(255, 0, 0));
-                                }
-
-                                row.add_flex_child(Align::centered(cell).expand(), 1.0);
-                            }
-
-                            row
-                        },
-                        1.0,
-                    );
-                }
-
-                Box::new(grid.expand())
-            }
+            AppState::FreePlay(state) => ui_free_play(&state),
         },
     );
     ui
+}
+
+fn ui_free_play(state: &FreePlayState) -> Box<dyn Widget<AppState>> {
+    let FreePlayState {
+        sounds,
+        sound_keys,
+        fn_keys,
+    } = state;
+
+    let mut grid = Flex::column();
+    // fn row
+    grid.add_flex_child(
+        {
+            let mut row = Flex::row();
+
+            for (i, fn_key) in fn_keys.into_iter().enumerate() {
+                let cell = Align::centered(
+                    Label::new(format!("F{i}"))
+                    
+                        .with_text_size(30.0)
+                        .with_text_alignment(druid::TextAlignment::Center)
+                        .with_text_color(druid::Color::BLACK),
+                )
+                .background(druid::Color::WHITE);
+                row.add_flex_child(cell.expand(), 1.0);
+            }
+
+            row.expand()
+        },
+        1.0,
+    );
+    debug!("ree");
+    // binding rows
+    for i in 0..3 {
+        // fn row
+        grid.add_flex_child(
+            {
+                let mut row = Flex::row();
+
+                for j in 0..4 {
+                    let binding = &sound_keys[i][j];
+
+                    let text = match binding.binding {
+                        Some(binding) => {
+                            format!("S{}", binding.0)
+                        }
+                        None => {
+                            format!("??")
+                        }
+                    };
+
+                    let mut cell = Label::new(text)
+                        .with_text_size(30.0)
+                        .with_text_alignment(druid::TextAlignment::Center);
+
+                    if binding.pressed {
+                        cell.set_text_color(druid::Color::rgb8(255, 0, 0));
+                    }
+
+                    row.add_flex_child(Align::centered(cell).expand(), 1.0);
+                }
+
+                row
+            },
+            1.0,
+        );
+    }
+    Box::new(grid.expand())
 }
