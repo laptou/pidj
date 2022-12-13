@@ -138,7 +138,10 @@ impl ReassignState {
             .filter_map(|s| {
                 if let Ok(partial_dir) = s.path.strip_prefix(&self.current_dir) {
                     if partial_dir.iter().count() > 1 {
-                        trace!("partial_dir = {partial_dir:?}, parent = {:?}, go", partial_dir.parent());
+                        trace!(
+                            "partial_dir = {partial_dir:?}, parent = {:?}, go",
+                            partial_dir.parent()
+                        );
                         // path has multiple segments, grab the first one
                         partial_dir.iter().nth(0)
                     } else {
@@ -286,7 +289,7 @@ async fn process_keyboard_event(
     event: keyboard::Event,
     kb_cmd_tx: flume::Sender<keyboard::Command>,
     _kb_evt_rx: flume::Receiver<keyboard::Event>,
-    _audio_cmd_tx: flume::Sender<audio::Command>,
+    audio_cmd_tx: flume::Sender<audio::Command>,
     _audio_evt_rx: flume::Receiver<audio::Event>,
 ) -> anyhow::Result<()> {
     match event {
@@ -321,9 +324,17 @@ async fn process_keyboard_event(
                             state.reassign_sound_save();
                         }
                     } else {
-                        // F1 + button = reassign key
-                        if state.fn_keys[0].pressed && pressed && y > 0 {
-                            state.reassign_sound_begin((x, y));
+                        if pressed && y > 0 {
+                            if state.fn_keys[0].pressed {
+                                // F1 + button = reassign key
+                                state.reassign_sound_begin((x, y));
+                            } else {
+                                // button = play sound if bound
+                                if let Some(id) = state.sound_keys[y - 1][x].binding {
+                                    let _ =
+                                        audio_cmd_tx.send(audio::Command::Play { sound_id: id });
+                                }
+                            }
                         }
                     }
 
@@ -460,8 +471,9 @@ fn render_reassign(
                 for subdir in &reassign.subdirs_in_dir {
                     let f = egui::containers::Frame::default()
                         .fill(egui::Color32::from_rgb(0, 0, 0))
+                        .inner_margin(Margin::symmetric(3., 6.))
                         .show(ui, |ui| {
-                            Label::new(RichText::new(subdir.to_string_lossy()).italics())
+                            Label::new(RichText::new(subdir.to_string_lossy()).italics().size(10.))
                                 .wrap(false)
                                 .ui(ui);
                         });
@@ -483,10 +495,12 @@ fn render_reassign(
 
                     let f = egui::containers::Frame::default()
                         .fill(egui::Color32::from_rgb(0, 0, 0))
+                        .inner_margin(Margin::symmetric(3., 6.))
                         .show(ui, |ui| {
                             let mut rt = RichText::new(
                                 sound_info.path.file_name().unwrap().to_string_lossy(),
-                            );
+                            )
+                            .size(10.);
 
                             if let Some(selection) = reassign.selection {
                                 if selection == *id {
