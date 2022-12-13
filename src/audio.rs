@@ -28,7 +28,7 @@ pub struct SoundId(pub usize);
 pub struct SoundInfo {
     pub id: SoundId,
     pub path: PathBuf,
-    pub duration: Option<Duration>,
+    pub duration: Duration,
 }
 
 pub async fn run(
@@ -92,7 +92,9 @@ pub async fn run(
                 let sound = SoundInfo {
                     id: SoundId(index),
                     path,
-                    duration: decoder.total_duration(),
+                    duration: decoder
+                        .total_duration()
+                        .context("couldn't get duration of sound")?,
                 };
 
                 Ok((sound, decoder))
