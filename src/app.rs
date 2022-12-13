@@ -1,3 +1,5 @@
+use egui::style::Margin;
+use egui::Vec2;
 use embedded_hal::timer::Cancel;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,7 +70,6 @@ pub fn run(
 
     let options = eframe::NativeOptions {
         always_on_top: true,
-        decorated: false,
         fullscreen: true,
         min_window_size: None,
         ..Default::default()
@@ -92,6 +93,14 @@ pub fn run(
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_pixels_per_point(4.);
+            cc.egui_ctx.set_style(egui::Style {
+                spacing: egui::style::Spacing {
+                    window_margin: Margin::same(0.0),
+                    item_spacing: Vec2::new(1.0, 1.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
             Box::new(App { state, cancel: ct })
         }),
     );
@@ -150,17 +159,15 @@ async fn process_keyboard_event(
             let (x, y) = (x as usize, y as usize);
             let AppState::FreePlay(state) = state else { return Ok(()); };
 
-            match key.edge {
-                keypad::Edge::High | keypad::Edge::Rising => {
-                    if y == 0 {
-                        state.fn_keys[x].pressed = true;
-                    }
-                }
-                keypad::Edge::Low | keypad::Edge::Falling => {
-                    if y == 0 {
-                        state.fn_keys[x].pressed = false;
-                    }
-                }
+            let pressed = match key.edge {
+                keypad::Edge::High | keypad::Edge::Rising => true,
+                keypad::Edge::Low | keypad::Edge::Falling => false,
+            };
+
+            if y == 0 {
+                state.fn_keys[x].pressed = pressed;
+            } else {
+                state.sound_keys[y - 1][x].pressed = pressed;
             }
         }
     }
@@ -208,8 +215,8 @@ impl eframe::App for App {
         let state = &mut *state;
 
         egui::CentralPanel::default().show(ctx, |ui| match state {
-            AppState::Loading(_) => ui.centered_and_justified(|ui| {
-                ui.group(|ui| {
+            AppState::Loading(_) => ui.vertical_centered(|ui| {
+                ui.horizontal_centered(|ui| {
                     ui.label("Loading");
                     ui.spinner();
                 });
@@ -225,6 +232,7 @@ impl eframe::App for App {
                         format!("F{}", i),
                     );
                 }
+                ui.end_row();
 
                 for (i, row) in state.sound_keys.iter().enumerate() {
                     for (j, key) in row.iter().enumerate() {
@@ -343,80 +351,3 @@ fn update_keyboard_freeplay(state: &FreePlayState, kb_cmd_tx: flume::Sender<keyb
         }
     }
 }
-
-// fn on_audio_event(handle: &ExtEventSink, channels: &Channels, evt: audio::Event) {
-//     let kb_cmd_tx = channels.kb_cmd_tx.clone();
-
-//     match evt {
-//         audio::Event::LoadingStart => {}
-//         audio::Event::LoadingEnd { sounds } => {
-//             let kb_cmd_tx = kb_cmd_tx.clone();
-//             handle.add_idle_callback(move |data| {
-//                 match data {
-//                     AppState::Loading(LoadingState { animation_cancel }) => {
-//                         animation_cancel.cancel()
-//                     }
-//                     _ => {
-//                         panic!(
-//                             "received audio::Event::LoadingEnd, but app was not in loading state"
-//                         );
-//                     }
-//                 }
-
-//                 let mut default_bindings: [[SoundKeyState; 4]; 3] = Default::default();
-
-//                 for x in 0..4 {
-//                     for y in 0..3 {
-//                         default_bindings[y][x].binding = Some(SoundId(y * 4 + x));
-//                     }
-//                 }
-
-//                 let inner = FreePlayState {
-//                     sounds,
-//                     sound_keys: default_bindings,
-//                 };
-
-//                 update_keyboard_freeplay(&inner, kb_cmd_tx.clone());
-
-//                 *data = AppState::FreePlay(inner);
-//             });
-//         }
-//     }
-// }
-
-// fn on_keyboard_event(handle: &ExtEventSink, channels: &Channels, evt: keyboard::Event) {
-//     match evt {
-//         keyboard::Event::Key(key) => {
-//             handle.add_idle_callback({
-//                 let audio_cmd_tx = channels.audio_cmd_tx.clone();
-//                 move |data| match data {
-//                     AppState::Loading(_) => {}
-//                     AppState::FreePlay(data) => {
-//                         let (x, y) = key.key;
-//                         let x = x as usize;
-//                         let y = y as usize;
-
-//                         if y > 0 {
-//                             match key.edge {
-//                                 keypad::Edge::High | keypad::Edge::Rising => {
-//                                     data.sound_keys[(y - 1)][x].pressed = true;
-
-//                                     match data.sound_keys[(y - 1)][x].binding {
-//                                         Some(id) => {
-//                                             let _ = audio_cmd_tx
-//                                                 .send(audio::Command::Play { sound_id: id });
-//                                         }
-//                                         _ => {}
-//                                     }
-//                                 }
-//                                 keypad::Edge::Low | keypad::Edge::Falling => {
-//                                     data.sound_keys[(y - 1)][x].pressed = false;
-//                                 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             });
-//         }
-//     }
-// }
