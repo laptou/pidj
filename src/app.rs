@@ -1,7 +1,7 @@
 use egui::style::Margin;
 use egui::Vec2;
 use embedded_hal::timer::Cancel;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::spawn;
@@ -148,10 +148,10 @@ async fn process_events(
 async fn process_keyboard_event(
     state: &mut AppState,
     event: keyboard::Event,
-    kb_cmd_tx: flume::Sender<keyboard::Command>,
-    kb_evt_rx: flume::Receiver<keyboard::Event>,
-    audio_cmd_tx: flume::Sender<audio::Command>,
-    audio_evt_rx: flume::Receiver<audio::Event>,
+    _kb_cmd_tx: flume::Sender<keyboard::Command>,
+    _kb_evt_rx: flume::Receiver<keyboard::Event>,
+    _audio_cmd_tx: flume::Sender<audio::Command>,
+    _audio_evt_rx: flume::Receiver<audio::Event>,
 ) -> anyhow::Result<()> {
     match event {
         keyboard::Event::Key(key) => {
@@ -179,9 +179,9 @@ async fn process_audio_event(
     state: &mut AppState,
     event: audio::Event,
     kb_cmd_tx: flume::Sender<keyboard::Command>,
-    kb_evt_rx: flume::Receiver<keyboard::Event>,
-    audio_cmd_tx: flume::Sender<audio::Command>,
-    audio_evt_rx: flume::Receiver<audio::Event>,
+    _kb_evt_rx: flume::Receiver<keyboard::Event>,
+    _audio_cmd_tx: flume::Sender<audio::Command>,
+    _audio_evt_rx: flume::Receiver<audio::Event>,
 ) -> anyhow::Result<()> {
     match event {
         audio::Event::LoadingEnd { sounds } => {
@@ -234,8 +234,8 @@ impl eframe::App for App {
                 }
                 ui.end_row();
 
-                for (i, row) in state.sound_keys.iter().enumerate() {
-                    for (j, key) in row.iter().enumerate() {
+                for (_i, row) in state.sound_keys.iter().enumerate() {
+                    for (_j, key) in row.iter().enumerate() {
                         ui.colored_label(
                             if key.pressed {
                                 egui::Color32::RED

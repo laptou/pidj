@@ -1,5 +1,5 @@
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 mod app;

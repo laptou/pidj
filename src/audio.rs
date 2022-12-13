@@ -1,12 +1,11 @@
-use std::{fs::File, future::Future, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs::File, io::BufReader, path::PathBuf, time::Duration};
 
 use anyhow::Context;
 use futures::stream::StreamExt;
 use rodio::{Decoder, OutputStream, Source};
 use tokio::{
-    runtime::{self, Handle, Runtime},
-    sync::{oneshot, Mutex},
-    task::LocalSet,
+    runtime::{self},
+    sync::oneshot,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
