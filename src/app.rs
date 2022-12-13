@@ -1,13 +1,15 @@
 use egui::style::Margin;
-use egui::Vec2;
-use embedded_hal::timer::Cancel;
+use egui::{Align, Label, Layout, RichText, Sense, Vec2, Widget};
 
+use std::collections::HashSet;
+use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::spawn;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 use crate::audio::{SoundId, SoundInfo};
 use crate::driver::adafruit::seesaw::keypad;
@@ -17,6 +19,8 @@ use crate::{audio, keyboard};
 struct App {
     state: Arc<Mutex<AppState>>,
     cancel: CancellationToken,
+    kb_cmd_tx: flume::Sender<keyboard::Command>,
+    audio_cmd_tx: flume::Sender<audio::Command>,
 }
 
 #[derive(Clone)]
@@ -37,7 +41,7 @@ enum LoadingStage {
     BufferingAudio { progress: usize, num_files: usize },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FreePlayState {
     sounds: Vec<SoundInfo>,
 
@@ -45,14 +49,143 @@ struct FreePlayState {
     sound_keys: [[SoundKeyState; 4]; 3],
 
     fn_keys: [FnKeyState; 4],
+
+    reassign: Option<ReassignState>,
 }
 
-#[derive(Clone, Default)]
+impl FreePlayState {
+    #[tracing::instrument(skip(self))]
+    pub fn reassign_sound_begin(&mut self, key: (usize, usize)) -> &mut ReassignState {
+        let base_dir = self
+            .sounds
+            .iter()
+            .map(|s| &s.path)
+            .fold(None, |acc, next| {
+                Some(match acc {
+                    Some(acc) => crate::util::path_intersection(acc, next),
+                    None => next.to_owned(),
+                })
+            })
+            .unwrap_or(PathBuf::new());
+
+        let mut state = ReassignState {
+            key,
+            current_dir: base_dir.clone(),
+            base_dir,
+            sounds_in_dir: vec![],
+            subdirs_in_dir: HashSet::new(),
+            selection: None,
+        };
+
+        // update sounds_in_dir and subdirs_in_dir
+        state.update(&self.sounds[..]);
+
+        self.reassign = Some(state);
+
+        self.reassign.as_mut().unwrap()
+    }
+
+    pub fn reassign_sound_save(&mut self) {
+        if let Some(reassign) = &mut self.reassign {
+            let (x, y) = reassign.key;
+            self.sound_keys[y - 1][x].binding = reassign.selection;
+            self.reassign_sound_quit();
+        }
+    }
+
+    pub fn reassign_sound_quit(&mut self) {
+        self.reassign = None;
+    }
+
+    pub fn reassign_sound_up(&mut self) {
+        if let Some(reassign) = &mut self.reassign {
+            reassign.up_dir(&self.sounds[..]);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReassignState {
+    key: (usize, usize),
+
+    base_dir: PathBuf,
+    current_dir: PathBuf,
+    sounds_in_dir: Vec<SoundId>,
+    subdirs_in_dir: HashSet<OsString>,
+
+    selection: Option<SoundId>,
+}
+
+impl ReassignState {
+    fn update(&mut self, sounds: &[SoundInfo]) {
+        self.sounds_in_dir = sounds
+            .iter()
+            .filter_map(|s| {
+                if let Some(parent) = s.path.parent() {
+                    if parent == self.current_dir {
+                        Some(s.id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.subdirs_in_dir = sounds
+            .iter()
+            .filter_map(|s| {
+                if let Ok(partial_dir) = s.path.strip_prefix(&self.current_dir) {
+                    if partial_dir.iter().count() > 1 {
+                        trace!("partial_dir = {partial_dir:?}, parent = {:?}, go", partial_dir.parent());
+                        // path has multiple segments, grab the first one
+                        partial_dir.iter().nth(0)
+                    } else {
+                        trace!("partial_dir = {partial_dir:?}, no");
+                        // this is the last segment of the path, meaning that this
+                        // is not a subdir, but a file
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .map(|s| s.to_owned())
+            .collect();
+
+        info!("subdirs = {:?}", &self.subdirs_in_dir);
+    }
+
+    #[tracing::instrument(skip(sounds))]
+    pub fn select_dir(&mut self, dir: &OsStr, sounds: &[SoundInfo]) {
+        info!("selecting dir");
+        self.current_dir.push(dir);
+        self.update(sounds);
+    }
+
+    #[tracing::instrument(skip(sounds))]
+    pub fn up_dir(&mut self, sounds: &[SoundInfo]) {
+        info!("going up a dir");
+        if self.current_dir.starts_with(&self.base_dir) && self.current_dir != self.base_dir {
+            self.current_dir.pop();
+            self.update(sounds);
+        }
+    }
+
+    #[tracing::instrument]
+    pub fn select_sound(&mut self, id: SoundId) {
+        info!("selecting sound");
+        self.selection = Some(id);
+    }
+}
+
+#[derive(Clone, Default, Debug)]
 struct FnKeyState {
     pressed: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 struct SoundKeyState {
     binding: Option<SoundId>,
     pressed: bool,
@@ -82,9 +215,9 @@ pub fn run(
 
     spawn(process_events(
         state.clone(),
-        kb_cmd_tx,
+        kb_cmd_tx.clone(),
         kb_evt_rx,
-        audio_cmd_tx,
+        audio_cmd_tx.clone(),
         audio_evt_rx,
     ));
 
@@ -101,7 +234,12 @@ pub fn run(
                 },
                 ..Default::default()
             });
-            Box::new(App { state, cancel: ct })
+            Box::new(App {
+                state,
+                cancel: ct,
+                kb_cmd_tx,
+                audio_cmd_tx,
+            })
         }),
     );
 
@@ -141,14 +279,12 @@ async fn process_events(
             }
         }
     }
-
-    Ok(())
 }
 
 async fn process_keyboard_event(
     state: &mut AppState,
     event: keyboard::Event,
-    _kb_cmd_tx: flume::Sender<keyboard::Command>,
+    kb_cmd_tx: flume::Sender<keyboard::Command>,
     _kb_evt_rx: flume::Receiver<keyboard::Event>,
     _audio_cmd_tx: flume::Sender<audio::Command>,
     _audio_evt_rx: flume::Receiver<audio::Event>,
@@ -157,17 +293,42 @@ async fn process_keyboard_event(
         keyboard::Event::Key(key) => {
             let (x, y) = key.key;
             let (x, y) = (x as usize, y as usize);
-            let AppState::FreePlay(state) = state else { return Ok(()); };
 
-            let pressed = match key.edge {
-                keypad::Edge::High | keypad::Edge::Rising => true,
-                keypad::Edge::Low | keypad::Edge::Falling => false,
-            };
+            match state {
+                AppState::Loading(_) => {}
+                AppState::FreePlay(state) => {
+                    let pressed = match key.edge {
+                        keypad::Edge::High | keypad::Edge::Rising => true,
+                        keypad::Edge::Low | keypad::Edge::Falling => false,
+                    };
 
-            if y == 0 {
-                state.fn_keys[x].pressed = pressed;
-            } else {
-                state.sound_keys[y - 1][x].pressed = pressed;
+                    if y == 0 {
+                        state.fn_keys[x].pressed = pressed;
+                    } else {
+                        state.sound_keys[y - 1][x].pressed = pressed;
+                    }
+
+                    if state.reassign.is_some() {
+                        if pressed && (x, y) == (0, 0) {
+                            // F1 = exit
+                            state.reassign_sound_quit();
+                        }
+                        if pressed && (x, y) == (1, 0) {
+                            // F2 = up one dir
+                            state.reassign_sound_up();
+                        } else if pressed && (x, y) == (3, 0) {
+                            // F4 = select & exit
+                            state.reassign_sound_save();
+                        }
+                    } else {
+                        // F1 + button = reassign key
+                        if state.fn_keys[0].pressed && pressed && y > 0 {
+                            state.reassign_sound_begin((x, y));
+                        }
+                    }
+
+                    update_keyboard_freeplay(state, kb_cmd_tx.clone());
+                }
             }
         }
     }
@@ -193,7 +354,9 @@ async fn process_audio_event(
                 sounds,
                 sound_keys: Default::default(),
                 fn_keys: Default::default(),
+                reassign: None,
             };
+
             update_keyboard_freeplay(&inner, kb_cmd_tx.clone());
             *state = AppState::FreePlay(inner);
         }
@@ -215,46 +378,139 @@ impl eframe::App for App {
         let state = &mut *state;
 
         egui::CentralPanel::default().show(ctx, |ui| match state {
-            AppState::Loading(_) => ui.vertical_centered(|ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.label("Loading");
-                    ui.spinner();
-                });
-            }),
-            AppState::FreePlay(state) => egui::Grid::new("free_play").show(ui, |ui| {
-                for (i, fn_key) in state.fn_keys.iter().enumerate() {
-                    ui.colored_label(
-                        if fn_key.pressed {
-                            egui::Color32::RED
-                        } else {
-                            egui::Color32::WHITE
-                        },
-                        format!("F{}", i),
-                    );
-                }
-                ui.end_row();
+            AppState::Loading(_) => {
+                ui.with_layout(
+                    Layout::centered_and_justified(egui::Direction::TopDown)
+                        .with_main_justify(false)
+                        .with_cross_justify(false),
+                    |ui| {
+                        ui.group(|ui| {
+                            Label::new("Loading").wrap(false).ui(ui);
+                            ui.spinner();
+                        });
+                    },
+                );
+            }
 
-                for (_i, row) in state.sound_keys.iter().enumerate() {
-                    for (_j, key) in row.iter().enumerate() {
+            AppState::FreePlay(state) => {
+                if state.reassign.is_some() {
+                    render_reassign(ui, state, &self.kb_cmd_tx);
+                    return;
+                }
+
+                egui::Grid::new("free_play").show(ui, |ui| {
+                    for (i, fn_key) in state.fn_keys.iter().enumerate() {
                         ui.colored_label(
-                            if key.pressed {
+                            if fn_key.pressed {
                                 egui::Color32::RED
                             } else {
                                 egui::Color32::WHITE
                             },
-                            if key.binding.is_some() {
-                                format!("X")
-                            } else {
-                                format!("?")
-                            },
+                            format!("F{}", i),
                         );
                     }
                     ui.end_row();
-                }
-            }),
+
+                    for row in state.sound_keys.iter() {
+                        for key in row.iter() {
+                            ui.colored_label(
+                                if key.pressed {
+                                    egui::Color32::RED
+                                } else {
+                                    egui::Color32::WHITE
+                                },
+                                if key.binding.is_some() {
+                                    format!("X")
+                                } else {
+                                    format!("?")
+                                },
+                            );
+                        }
+                        ui.end_row();
+                    }
+                });
+            }
         });
 
         ctx.request_repaint();
+    }
+}
+
+fn render_reassign(
+    ui: &mut egui::Ui,
+    state: &mut FreePlayState,
+    kb_cmd_tx: &flume::Sender<keyboard::Command>,
+) {
+    let Some(reassign) = &mut state.reassign else { return; };
+    let mut update_keyboard = false;
+
+    ui.vertical(|ui| {
+        let (x, y) = reassign.key;
+        ui.label(format!("Reassigning key ({x}, {y})"));
+
+        Label::new(egui::RichText::new(reassign.current_dir.to_string_lossy()).size(8.0))
+            .wrap(false)
+            .ui(ui);
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut selected_subdir = None;
+
+                for subdir in &reassign.subdirs_in_dir {
+                    let f = egui::containers::Frame::default()
+                        .fill(egui::Color32::from_rgb(0, 0, 0))
+                        .show(ui, |ui| {
+                            Label::new(RichText::new(subdir.to_string_lossy()).italics())
+                                .wrap(false)
+                                .ui(ui);
+                        });
+
+                    if f.response.interact(Sense::click()).clicked() {
+                        selected_subdir = Some(subdir.clone());
+                    }
+                }
+
+                if let Some(selected_subdir) = selected_subdir {
+                    reassign.select_dir(&selected_subdir, &state.sounds[..]);
+                    update_keyboard = true;
+                }
+
+                let mut selected_sound = None;
+
+                for id in &reassign.sounds_in_dir {
+                    let sound_info = &state.sounds[id.0];
+
+                    let f = egui::containers::Frame::default()
+                        .fill(egui::Color32::from_rgb(0, 0, 0))
+                        .show(ui, |ui| {
+                            let mut rt = RichText::new(
+                                sound_info.path.file_name().unwrap().to_string_lossy(),
+                            );
+
+                            if let Some(selection) = reassign.selection {
+                                if selection == *id {
+                                    rt = rt.strong();
+                                }
+                            }
+
+                            Label::new(rt).wrap(false).ui(ui);
+                        });
+
+                    if f.response.interact(Sense::click()).clicked() {
+                        selected_sound = Some(*id);
+                    }
+                }
+
+                if let Some(selected_sound) = selected_sound {
+                    reassign.select_sound(selected_sound);
+                    update_keyboard = true;
+                }
+            });
+    });
+
+    if update_keyboard {
+        update_keyboard_freeplay(state, kb_cmd_tx.clone());
     }
 }
 
@@ -264,45 +520,24 @@ fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keybo
 
         for x in 0..4 {
             for y in 0..4 {
-                let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                    x,
-                    y,
-                    state: keyboard::PixelState::Solid {
-                        color: Color::from_f32(0., 0., 0.3),
-                        update: true,
-                    },
-                });
+                set_solid_color(&kb_cmd_tx, x, y, Color::from_f32(0., 0., 0.3));
             }
         }
 
-        let mut highlight = 0;
+        let mut highlight = 15;
 
         while !ct.is_cancelled() {
             let x = highlight % 4;
             let y = highlight / 4;
 
-            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                x,
-                y,
-                state: keyboard::PixelState::Solid {
-                    color: Color::from_f32(0., 0.1, 0.3),
-                    update: true,
-                },
-            });
+            set_solid_color(&kb_cmd_tx, x, y, Color::from_f32(0., 0., 0.3));
 
             highlight = (highlight + 1) % 16;
 
             let x = highlight % 4;
             let y = highlight / 4;
 
-            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                x,
-                y,
-                state: keyboard::PixelState::Solid {
-                    color: Color::from_f32(0., 0.2, 0.7),
-                    update: true,
-                },
-            });
+            set_solid_color(&kb_cmd_tx, x, y, Color::from_f32(0., 0.2, 0.7));
 
             trace!("loading animation step");
 
@@ -313,41 +548,56 @@ fn start_loading_animation(ct: CancellationToken, kb_cmd_tx: flume::Sender<keybo
     });
 }
 
+fn set_solid_color(kb_cmd_tx: &flume::Sender<keyboard::Command>, x: usize, y: usize, color: Color) {
+    let _ = kb_cmd_tx.send(keyboard::Command::SetState {
+        x: x as u16,
+        y: y as u16,
+        state: keyboard::PixelState::Solid {
+            color,
+            update: true,
+        },
+    });
+}
+
 fn update_keyboard_freeplay(state: &FreePlayState, kb_cmd_tx: flume::Sender<keyboard::Command>) {
+    if let Some(reassign) = &state.reassign {
+        set_solid_color(&kb_cmd_tx, 0, 0, Color::from_u8(255, 0, 0));
+        set_solid_color(&kb_cmd_tx, 1, 0, Color::from_u8(255, 165, 0));
+        set_solid_color(&kb_cmd_tx, 2, 0, Color::BLACK);
+
+        // if something is selected, save button is bright green
+        // otherwise, dim green
+        if reassign.selection.is_some() {
+            set_solid_color(&kb_cmd_tx, 3, 0, Color::from_u8(0, 255, 0));
+        } else {
+            set_solid_color(&kb_cmd_tx, 3, 0, Color::from_u8(0, 50, 0));
+        }
+
+        for x in 0..4 {
+            for y in 1..4 {
+                if (x, y) == reassign.key {
+                    set_solid_color(&kb_cmd_tx, x, y, Color::WHITE);
+                } else {
+                    set_solid_color(&kb_cmd_tx, x, y, Color::BLACK);
+                }
+            }
+        }
+
+        return;
+    }
+
     for x in 0..4 {
-        let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-            x,
-            y: 0,
-            state: keyboard::PixelState::Solid {
-                color: Color::WHITE,
-                update: true,
-            },
-        });
+        set_solid_color(&kb_cmd_tx, x, 0, Color::WHITE);
     }
 
     for x in 0..4 {
         for y in 1..4 {
-            let key_state = match state.sound_keys[y - 1][x].binding {
-                Some(_) => keyboard::PixelState::Solid {
-                    color: Color {
-                        r: 50,
-                        g: 50,
-                        b: 50,
-                        w: 0,
-                    },
-                    update: true,
-                },
-                None => keyboard::PixelState::Solid {
-                    color: Color::BLACK,
-                    update: true,
-                },
+            let color = match state.sound_keys[y - 1][x].binding {
+                Some(_) => Color::from_u8(50, 50, 50),
+                None => Color::BLACK,
             };
 
-            let _ = kb_cmd_tx.send(keyboard::Command::SetState {
-                x: x as u16,
-                y: y as u16,
-                state: key_state,
-            });
+            set_solid_color(&kb_cmd_tx, x, y, color);
         }
     }
 }

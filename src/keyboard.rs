@@ -93,12 +93,13 @@ pub fn run(
                     16
                 ];
 
-                let mut interval = Interval::new(Duration::from_millis(1000 / 60));
+                let mut interval = Interval::new(Duration::from_millis(1000 / 30));
 
                 debug!("running keyboard colour loop");
 
                 while !ct.is_cancelled() {
                     interval.tick();
+
                     {
                         let mut nt = nt.lock().unwrap();
 
@@ -205,6 +206,19 @@ pub fn run(
                     };
                 }
 
+                // when program is exited, turn the keyboard off
+                {
+                    let nt = &mut *nt.lock().unwrap();
+                    for x in 0..4 {
+                        for y in 0..4 {
+                            nt.set_pixel_color(x, y, Color::BLACK)?;
+                        }
+                    }
+
+                    std::thread::sleep(Duration::from_micros(300));
+                    nt.show()?;
+                }
+
                 debug!("exiting keyboard colour loop");
 
                 Ok(())
@@ -216,9 +230,9 @@ pub fn run(
             move || -> anyhow::Result<()> {
                 debug!("starting keyboard event loop");
 
-                // sample keyboard for events at 120Hz
+                // sample keyboard for events at 30Hz
 
-                let mut interval = Interval::new(Duration::from_millis(1000 / 120));
+                let mut interval = Interval::new(Duration::from_millis(1000 / 30));
 
                 while !ct.is_cancelled() {
                     interval.tick();
